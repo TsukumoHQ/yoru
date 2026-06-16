@@ -1,0 +1,30 @@
+# Yoru — allow search + AI crawlers on public pages; keep the app/auth routes out.
+User-agent: *
+Allow: /$
+Allow: /signup
+Allow: /signin
+Allow: /welcome
+Allow: /docs/
+Disallow: /s/
+Disallow: /settings/
+Disallow: /auth/
+Disallow: /cli/
+Disallow: /billing/
+Disallow: /integrations/
+Disallow: /__smoke
+
+# AI answer engines — explicitly allowed.
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: Google-Extended
+Allow: /
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://yoru.sh/sitemap.xml

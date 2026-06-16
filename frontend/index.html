@@ -6,7 +6,56 @@
     <link rel="apple-touch-icon" href="/yoru-mark.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0f0d0c" />
     <title>Yoru — session receipts for AI coding agents</title>
+    <meta
+      name="description"
+      content="Yoru records what your AI coding agents did each session — tool calls, file changes, errors — and turns it into readable summaries and an exportable trail. See and audit your agents in production."
+    />
+    <link rel="canonical" href="https://yoru.sh/" />
+
+    <!-- Open Graph / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Yoru" />
+    <meta property="og:title" content="Yoru — session receipts for AI coding agents" />
+    <meta
+      property="og:description"
+      content="See what your AI coding agents did: per-session receipts, readable summaries, and an exportable trail. Observability for agents in production."
+    />
+    <meta property="og:url" content="https://yoru.sh/" />
+    <meta property="og:image" content="https://yoru.sh/yoru-mark.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Yoru — session receipts for AI coding agents" />
+    <meta
+      name="twitter:description"
+      content="See what your AI coding agents did: per-session receipts, readable summaries, and an exportable trail."
+    />
+    <meta name="twitter:image" content="https://yoru.sh/yoru-mark.png" />
+
+    <!-- Structured data: the app entity + the suite it belongs to (built by tsukumo).
+         No fabricated metrics; features mirror the product (sessions, summaries, trail). -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Yoru",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Linux, Windows",
+        "url": "https://yoru.sh/",
+        "description": "Yoru records what your AI coding agents did each session — tool calls, file changes, and errors — and turns it into readable summaries and an exportable trail, so you can see and audit your agents in production.",
+        "sameAs": ["https://github.com/yoru-sh/yoru"],
+        "publisher": {
+          "@type": "Organization",
+          "name": "tsukumo",
+          "url": "https://tsukumo.ch/",
+          "sameAs": [
+            "https://tsukumo.ch/",
+            "https://trovex.dev/",
+            "https://github.com/Synergix-lab/WRAI.TH"
+          ]
+        }
+      }
+    </script>
     <script>
       // Pre-mount theme bootstrap — prevents FOUC. Dark is the product default;
       // explicit localStorage choice wins; otherwise we only flip to light when
