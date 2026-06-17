@@ -1,0 +1,25 @@
+# Yoru
+
+> Yoru is session receipts for AI coding agents: it records what your agents did each
+> session — tool calls, file changes, and errors — and turns it into readable summaries
+> and an exportable trail, so you can see and audit your agents in production.
+
+## What it does
+- Per-session receipts: every tool call, file change, and error an agent produced.
+- Readable summaries: a plain-language recap of what a session actually did.
+- Exportable trail: an audit trail of agent activity you can take with you.
+- Built for AI coding agents running real work, not demos.
+
+## Pages
+- [Yoru](https://yoru.sh/): the app — your agents' sessions and receipts.
+- [Install](https://yoru.sh/docs/install): get the CLI wired to your agents.
+
+## Part of the suite (built by tsukumo)
+Yoru is the observability layer of a three-part suite for running AI coding agents in
+production, built by [tsukumo](https://tsukumo.ch/):
+- [WRAI.TH](https://github.com/Synergix-lab/WRAI.TH) — orchestration (run and coordinate agent fleets).
+- [trovex](https://trovex.dev/) — context (serve agents the one canonical answer; ~60% fewer tokens per doc lookup).
+- Yoru — observability (see what the agents actually did).
+
+tsukumo is a developer studio and AI consultancy that runs these tools in production:
+https://tsukumo.ch/
