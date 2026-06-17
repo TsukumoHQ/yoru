@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+<rect width="1200" height="630" fill="#0f0d0c"/>
+<rect x="0" y="0" width="14" height="630" fill="#f59e0b"/>
+<polygon points="90,72 110,92 90,112 70,92" fill="none" stroke="#faf7f2" stroke-width="3"/><line x1="110" y1="92" x2="126" y2="92" stroke="#f59e0b" stroke-width="3" stroke-dasharray="3 4"/><circle cx="134" cy="92" r="6" fill="#f59e0b"/>
+<text x="156" y="102" font-family="Inter" font-weight="700" font-size="34" letter-spacing="-0.01em" fill="#faf7f2">yoru</text>
+<text x="1128" y="100" font-family="JetBrains Mono" font-size="21" fill="#8c806c" text-anchor="end">observability / session receipts</text>
+<text x="84" y="288" font-family="Inter" font-weight="800" font-size="78" letter-spacing="-0.02em" fill="#faf7f2">session receipts for AI</text><text x="84" y="373" font-family="Inter" font-weight="800" font-size="78" letter-spacing="-0.02em" fill="#faf7f2">coding agents</text>
+<rect x="86" y="477" width="104" height="9" fill="#f59e0b"/>
+<line x1="84" y1="566" x2="1128" y2="566" stroke="rgba(250,247,242,0.12)" stroke-width="1.5"/>
+<text x="84" y="600" font-family="JetBrains Mono" font-size="22" fill="#f59e0b">yoru.sh</text>
+</svg>
