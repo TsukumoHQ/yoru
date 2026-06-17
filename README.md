@@ -49,3 +49,7 @@ AGPL-3.0 · [LICENSE](./LICENSE). Modifying the server and exposing it to other 
 The CLI is MIT (separate repo). See [`LICENSING.md`](./LICENSING.md) for the full rationale.
 
 Issues and PRs welcome.
+
+---
+
+Running agents in production across a team? [tsukumo](https://tsukumo.ch/consulting?utm_source=yoru&utm_medium=oss-suite&utm_campaign=consulting) consults on doing it well.
