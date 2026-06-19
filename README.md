@@ -42,6 +42,14 @@ curl http://localhost:8002/health/ready
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the stack layout and boundaries.
 
+## Who builds this
+
+yoru is built and run by the team behind **[tsukumo](https://tsukumo.ch/?utm_source=yoru&utm_medium=oss-suite&utm_campaign=consulting&utm_content=readme)** — we help engineering teams run AI coding agents in production. yoru is how we see what our own agents did; free and open source (AGPL).
+
+Pairs with **wrai.th** (orchestration) and **trovex** (context, fewer tokens).
+
+> Running agents in production and flying blind? That's our work — [talk to us](https://tsukumo.ch/?utm_source=yoru&utm_medium=oss-suite&utm_campaign=consulting&utm_content=readme).
+
 ## License
 
 AGPL-3.0 · [LICENSE](./LICENSE). Modifying the server and exposing it to other users triggers the source-distribution clause — fine for internal company self-hosting, talk to us first before running a competing hosted service on top of this code.
@@ -52,4 +60,4 @@ Issues and PRs welcome.
 
 ---
 
-Running agents in production across a team? [tsukumo](https://tsukumo.ch/consulting?utm_source=yoru&utm_medium=oss-suite&utm_campaign=consulting) consults on doing it well.
+Running agents in production across a team? [tsukumo](https://tsukumo.ch/?utm_source=yoru&utm_medium=oss-suite&utm_campaign=consulting&utm_content=footer) consults on doing it well.
