@@ -5,13 +5,16 @@ import { useSession } from "../auth/useSession"
 import { UpgradeBanner } from "../features/billing/UpgradeBanner"
 import { NotificationBell } from "../features/notifications/NotificationBell"
 import { apiFetch, ApiError } from "../lib/api"
+import { useInstanceConfig } from "../lib/config"
 
-const NAV: { to: string; label: string; end?: boolean }[] = [
+type NavItem = { to: string; label: string; end?: boolean; billingOnly?: boolean }
+
+const NAV: NavItem[] = [
   { to: "/",                        label: "/sessions",       end: true },
   { to: "/settings/workspaces",     label: "/workspaces" },
-  { to: "/settings/organizations",  label: "/organizations" },
+  { to: "/settings/teams",          label: "/teams" },
   { to: "/settings/tokens",         label: "/tokens" },
-  { to: "/settings/billing",        label: "/billing" },
+  { to: "/settings/billing",        label: "/billing", billingOnly: true },
   { to: "/settings/profile",        label: "/profile" },
 ]
 
@@ -65,11 +68,15 @@ export function AppShell() {
   const { user, signOut } = useSession()
   const navigate = useNavigate()
   const [signingOut, setSigningOut] = useState(false)
+  const config = useInstanceConfig()
+
+  // On a self-hosted instance (billing disabled) hide billing-only nav.
+  const navItems = NAV.filter((item) => config.billing_enabled || !item.billingOnly)
 
   const { data: plan = "free" } = useQuery({
     queryKey: ["me", "subscription", "plan"],
     queryFn: fetchPlanBadge,
-    enabled: !!user,
+    enabled: !!user && config.billing_enabled,
     staleTime: 60_000,
     retry: 0,
     meta: { silent: true },
@@ -105,7 +112,7 @@ export function AppShell() {
               yoru
             </Link>
             <nav aria-label="Primary" className="hidden items-center gap-5 md:flex">
-              {NAV.map((item) => (
+              {navItems.map((item) => (
                 <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
                   {item.label}
                 </NavLink>
@@ -113,7 +120,7 @@ export function AppShell() {
             </nav>
           </div>
           <div className="flex items-center gap-3">
-            <PlanBadge plan={plan} />
+            {config.billing_enabled && <PlanBadge plan={plan} />}
             <NotificationBell />
             <span className="hidden text-caption text-ink-muted md:inline">{user?.email}</span>
             <button
@@ -139,7 +146,7 @@ export function AppShell() {
         </div>
       </header>
       <main id="main" className="mx-auto max-w-6xl px-6 py-6">
-        <UpgradeBanner />
+        {config.billing_enabled && <UpgradeBanner />}
         <Outlet />
       </main>
     </div>

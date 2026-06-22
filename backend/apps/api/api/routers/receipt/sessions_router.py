@@ -40,6 +40,18 @@ _PUBLIC_SITE_BASE = os.environ.get("YORU_PUBLIC_URL", "https://yoru.sh").rstrip(
 def _public_session_url(session_id: str) -> str:
     return f"{_PUBLIC_SITE_BASE}/s/{session_id}"
 
+
+def _session_visible(row, current_user: str) -> bool:
+    """Group-scoped access: the owner, their group-mates, or an admin may act on
+    a session. The confidentiality wall is between groups, not within one. A
+    missing row returns False so callers 404 (not 403) and don't leak existence.
+    """
+    if row is None:
+        return False
+    from apps.api.api.services.access.visibility import visible_emails_sync
+    visible = visible_emails_sync(current_user)
+    return visible is None or row.user in visible
+
 # Tool-name classes for path/content extraction (v1 timeline enrichment).
 _FILE_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"})
 
@@ -333,7 +345,10 @@ class SessionsRouter:
         db: SQLSession = Depends(get_session),
         current_user: str = Depends(require_current_user),
     ) -> SessionListResponse:
-        filters = [SessionRow.user == current_user]
+        # Group-scoped visibility: own + group-mates' sessions; admin sees all.
+        from apps.api.api.services.access.visibility import visible_emails_sync
+        visible = visible_emails_sync(current_user)
+        filters = [] if visible is None else [SessionRow.user.in_(visible)]
         if from_ts is not None:
             filters.append(SessionRow.started_at >= from_ts)
         if to_ts is not None:
@@ -377,7 +392,7 @@ class SessionsRouter:
             select(SessionRow).where(SessionRow.id == session_id)
         ).first()
         # 404 (not 403) on cross-user to avoid leaking existence.
-        if row is None or row.user != current_user:
+        if not _session_visible(row, current_user):
             raise HTTPException(status_code=404, detail="session not found")
 
         # Fetch last 1000 events (ordered DESC, then reverse to ASC) +
@@ -455,7 +470,7 @@ class SessionsRouter:
         row = db.exec(
             select(SessionRow).where(SessionRow.id == session_id)
         ).first()
-        if row is None or row.user != current_user:
+        if not _session_visible(row, current_user):
             raise HTTPException(status_code=404, detail="session not found")
 
         # Pull the tailer rows first so we can offset the aggregate.
@@ -498,7 +513,7 @@ class SessionsRouter:
         row = db.exec(
             select(SessionRow).where(SessionRow.id == session_id)
         ).first()
-        if row is None or row.user != current_user:
+        if not _session_visible(row, current_user):
             raise HTTPException(status_code=404, detail="session not found")
 
         events = db.exec(
@@ -536,7 +551,7 @@ class SessionsRouter:
         row = db.exec(
             select(SessionRow).where(SessionRow.id == session_id)
         ).first()
-        if row is None or row.user != current_user:
+        if not _session_visible(row, current_user):
             raise HTTPException(status_code=404, detail="session not found")
 
         source = (body.source if body is not None else "dashboard")
@@ -569,7 +584,7 @@ class SessionsRouter:
         row = db.exec(
             select(SessionRow).where(SessionRow.id == session_id)
         ).first()
-        if row is None or row.user != current_user:
+        if not _session_visible(row, current_user):
             raise HTTPException(status_code=404, detail="session not found")
 
         if row.is_public:

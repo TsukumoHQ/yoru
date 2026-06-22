@@ -48,8 +48,10 @@ async def list_route_rules(user_token: str, user_id: UUID) -> list[RouteRuleOut]
     """
     sb = get_data_store(access_token=user_token)
     try:
+        # Owner-scoped — route rules are personal config (was: returned all users').
         rows = sb.query_records(
             "route_rules",
+            filters={"user_id": str(user_id)},
             order_by="priority",
         )
     except Exception as exc:
@@ -83,11 +85,17 @@ async def create_route_rule(
     return RouteRuleOut(**rows[0])
 
 
-async def delete_route_rule(user_token: str, rule_id: str) -> None:
-    """Delete a user-scope rule. RLS policy only permits deleting own rules."""
+async def delete_route_rule(user_token: str, rule_id: str, user_id: UUID) -> None:
+    """Delete a user-scope rule — scoped to the caller (was: any rule by id)."""
     sb = get_data_store(access_token=user_token)
     try:
-        resp = sb.client.table("route_rules").delete().eq("id", rule_id).execute()
+        resp = (
+            sb.client.table("route_rules")
+            .delete()
+            .eq("id", rule_id)
+            .eq("user_id", str(user_id))
+            .execute()
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"delete failed: {exc}") from exc
     rows = getattr(resp, "data", None) or []

@@ -13,6 +13,7 @@ because it's a COUNT check that RLS can't cleanly express.
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 from uuid import UUID
 
@@ -83,11 +84,13 @@ def _sb(user_token: str) -> SupabaseManager:
 
 # ---------- Endpoints ----------
 
-async def list_workspaces(user_token: str) -> list[WorkspaceOut]:
+async def list_workspaces(user_token: str, user_id: UUID) -> list[WorkspaceOut]:
     sb = _sb(user_token)
+    # Group-scoped visibility: a caller sees their own + group-mates' workspaces;
+    # admin sees all. Closes the cross-user leak (was: every user saw all).
+    from apps.api.api.services.access.visibility import visible_owner_ids
+    allowed = await visible_owner_ids(user_id)
     try:
-        # `is.null` isn't supported via query_records filters (which do eq.),
-        # so we use the raw postgrest client and filter client-side.
         resp = (
             sb.client.table("workspaces")
             .select("*")
@@ -98,6 +101,8 @@ async def list_workspaces(user_token: str) -> list[WorkspaceOut]:
         rows = getattr(resp, "data", None) or []
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"list failed: {exc}") from exc
+    if allowed is not None:
+        rows = [r for r in rows if str(r.get("owner_user_id")) in allowed]
     out: list[WorkspaceOut] = []
     for r in rows:
         out.append(WorkspaceOut(
@@ -150,7 +155,7 @@ async def create_workspace(
 
 
 async def update_workspace(
-    user_token: str, workspace_id: str, body: WorkspacePatch,
+    user_token: str, workspace_id: str, body: WorkspacePatch, user_id: UUID,
 ) -> WorkspaceOut:
     sb = _sb(user_token)
     patch: dict = {}
@@ -161,7 +166,14 @@ async def update_workspace(
     if not patch:
         raise HTTPException(status_code=400, detail="no fields to update")
     try:
-        resp = sb.client.table("workspaces").update(patch).eq("id", workspace_id).execute()
+        # Owner-only mutation — scope the update to the caller's own row.
+        resp = (
+            sb.client.table("workspaces")
+            .update(patch)
+            .eq("id", workspace_id)
+            .eq("owner_user_id", str(user_id))
+            .execute()
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"update failed: {exc}") from exc
     rows = getattr(resp, "data", None) or []
@@ -176,15 +188,17 @@ async def update_workspace(
     )
 
 
-async def delete_workspace(user_token: str, workspace_id: str) -> None:
+async def delete_workspace(user_token: str, workspace_id: str, user_id: UUID) -> None:
     from datetime import datetime, timezone
     sb = _sb(user_token)
     now = datetime.now(timezone.utc).isoformat()
     try:
+        # Owner-only — scope the soft-delete to the caller's own row.
         resp = (
             sb.client.table("workspaces")
             .update({"deleted_at": now})
             .eq("id", workspace_id)
+            .eq("owner_user_id", str(user_id))
             .execute()
         )
     except Exception as exc:
@@ -335,7 +349,7 @@ async def promote_workspace(
 
 # ---------- Plan gating ----------
 
-def _enforce_workspaces_max(sb: SupabaseManager, user_id: str) -> None:
+def _enforce_workspaces_max(sb, user_id: str) -> None:
     """Count the user's personal workspaces, compare to the plan's
     `workspaces_max` feature. 402 if at/over limit.
 
@@ -345,6 +359,9 @@ def _enforce_workspaces_max(sb: SupabaseManager, user_id: str) -> None:
 
     The value is expected as `{"limit": N}` where -1 or -2 mean unlimited.
     """
+    # Self-host (billing disabled) → everything unlimited, no quota gating.
+    if os.getenv("BILLING_ENABLED", "false").strip().lower() not in ("1", "true", "yes"):
+        return
     # Fetch user's current personal workspace count.
     try:
         res = (

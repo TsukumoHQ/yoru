@@ -230,23 +230,40 @@ app.include_router(NotificationAdminRouter().get_router(), prefix="/api/v1")
 dashboard_router = DashboardRouter()
 app.include_router(dashboard_router.get_router(), prefix="/api/v1")
 
-checkout_router = CheckoutRouter()
-app.include_router(checkout_router.get_router(), prefix="/api/v1/billing")
+# Billing + sales are hosted-only. A self-hosted instance (BILLING_ENABLED unset)
+# never mounts the Stripe/Polar checkout/portal/webhook or the contact-sales form,
+# so there is no dead/dangerous payment surface and no broken "Upgrade" CTA.
+_BILLING_ENABLED = os.getenv("BILLING_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+if _BILLING_ENABLED:
+    checkout_router = CheckoutRouter()
+    app.include_router(checkout_router.get_router(), prefix="/api/v1/billing")
 
-portal_router = PortalRouter()
-app.include_router(portal_router.get_router(), prefix="/api/v1/billing")
+    portal_router = PortalRouter()
+    app.include_router(portal_router.get_router(), prefix="/api/v1/billing")
 
-billing_webhook_router = WebhookRouter()
-app.include_router(billing_webhook_router.get_router(), prefix="/api/v1/billing")
+    billing_webhook_router = WebhookRouter()
+    app.include_router(billing_webhook_router.get_router(), prefix="/api/v1/billing")
 
-# Public Contact-Sales form endpoint — unauth, rate-limited, honeypot-protected.
-# Writes to sales_leads + emails sales@yoru.sh. Cloud-only in practice;
-# self-hosters can skip the sales_leads migration if they don't expose a form.
-sales_contact_router = SalesContactRouter()
-app.include_router(sales_contact_router.get_router(), prefix="/api/v1")
+    # Public Contact-Sales form — unauth, rate-limited, honeypot-protected.
+    sales_contact_router = SalesContactRouter()
+    app.include_router(sales_contact_router.get_router(), prefix="/api/v1")
 
 webhooks_router = WebhooksRouter()
 app.include_router(webhooks_router.get_router(), prefix="/api/v1")
+
+
+@app.get("/api/v1/config", tags=["config"], summary="Public instance configuration")
+def instance_config() -> dict:
+    """Runtime flags the SPA needs to shape itself for this deployment.
+
+    Lets the dashboard hide billing/upgrade/multi-tenant UI on a self-hosted
+    instance instead of shipping dead CTAs."""
+    return {
+        "billing_enabled": _BILLING_ENABLED,
+        "auth_provider": os.getenv("AUTH_PROVIDER", "local").strip().lower(),
+        "instance_name": os.getenv("INSTANCE_NAME", "Yoru"),
+        "single_org": not _BILLING_ENABLED,
+    }
 
 health_deep_router = HealthDeepRouter()
 app.include_router(health_deep_router.get_router(), prefix="/api/v1")

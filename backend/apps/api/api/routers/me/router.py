@@ -353,16 +353,17 @@ class MeRouter:
         user_id: UUID = Depends(get_current_user_id),
         token: str = Depends(get_current_user_token),
     ) -> None:
-        return await delete_route_rule(token, rule_id)
+        return await delete_route_rule(token, rule_id, user_id)
 
     # ---------- Workspaces (Phase W2) ----------
 
     async def list_my_workspaces(
         self,
         request: Request,
+        user_id: UUID = Depends(get_current_user_id),
         token: str = Depends(get_current_user_token),
     ) -> list[WorkspaceOut]:
-        return await list_workspaces(token)
+        return await list_workspaces(token, user_id)
 
     async def create_my_workspace(
         self,
@@ -378,17 +379,19 @@ class MeRouter:
         request: Request,
         workspace_id: str,
         body: WorkspacePatch,
+        user_id: UUID = Depends(get_current_user_id),
         token: str = Depends(get_current_user_token),
     ) -> WorkspaceOut:
-        return await update_workspace(token, workspace_id, body)
+        return await update_workspace(token, workspace_id, body, user_id)
 
     async def delete_my_workspace(
         self,
         request: Request,
         workspace_id: str,
+        user_id: UUID = Depends(get_current_user_id),
         token: str = Depends(get_current_user_token),
     ) -> None:
-        return await delete_workspace(token, workspace_id)
+        return await delete_workspace(token, workspace_id, user_id)
 
     async def list_my_workspace_repos(
         self,
