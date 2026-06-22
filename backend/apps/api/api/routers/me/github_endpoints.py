@@ -25,6 +25,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 
 
 class GithubConnectIn(BaseModel):
@@ -57,7 +58,7 @@ class AutoRouteIn(BaseModel):
 
 
 def _sb(user_token: str) -> SupabaseManager:
-    return SupabaseManager(access_token=user_token)
+    return get_data_store(access_token=user_token)
 
 
 async def get_github_status(

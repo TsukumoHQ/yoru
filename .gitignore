@@ -70,3 +70,9 @@ backend/receipt.db
 # Runtime caches populated by pricing warmup etc.
 backend/data/*.json
 .saasforge
+
+# Local-auth JWT signing secret (auto-generated, machine-local — NEVER commit)
+backend/data/.auth_jwt_secret
+
+# Embedding cache (trovex / fastembed)
+.fastembed_cache/

@@ -21,6 +21,7 @@ from uuid import UUID
 from libs.log_manager.controller import LoggingController
 from libs.redis.redis import RedisManager
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 
 
 class HeartbeatService:
@@ -42,7 +43,7 @@ class HeartbeatService:
         redis: RedisManager | None = None,
         logger: LoggingController | None = None,
     ):
-        self.supabase = supabase or SupabaseManager(access_token=access_token)
+        self.supabase = supabase or get_data_store(access_token=access_token)
         self.redis = redis or RedisManager()
         self.logger = logger or LoggingController(app_name="HeartbeatService")
 

@@ -189,6 +189,13 @@ app.include_router(pricing_router.get_router(), prefix="/api/v1")
 auth_router = AuthRouter()
 app.include_router(auth_router.get_router(), prefix="/api/v1")
 
+# First-run onboarding (/api/v1/setup/*). Unauthenticated by necessity; locks
+# itself once an admin exists. Shares its core with the `make setup` CLI.
+from apps.api.api.routers.setup.router import SetupRouter  # noqa: E402
+
+setup_router = SetupRouter()
+app.include_router(setup_router.get_router(), prefix="/api/v1")
+
 # Dashboard cookie-based auth (Supabase-backed signup/signin/me/refresh/signout).
 # Sits alongside the Receipt CLI hook-token router above — both mounted under
 # /api/v1/auth, but routes don't collide (CLI uses /hook-token*, dashboard uses

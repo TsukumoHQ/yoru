@@ -8,6 +8,7 @@ from uuid import UUID
 
 from libs.log_manager.controller import LoggingController
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 from apps.api.api.exceptions.domain_exceptions import NotFoundError, ValidationError
 from apps.api.api.models.subscription.subscription_models import (
     SubscriptionCreate,
@@ -28,7 +29,7 @@ class SubscriptionService:
         logger: LoggingController | None = None,
         promo_service: PromoService | None = None,
     ):
-        self.supabase = supabase or SupabaseManager(access_token=access_token)
+        self.supabase = supabase or get_data_store(access_token=access_token)
         self.logger = logger or LoggingController(app_name="SubscriptionService")
         self.promo_service = promo_service or PromoService(
             access_token=access_token, supabase=self.supabase, logger=self.logger

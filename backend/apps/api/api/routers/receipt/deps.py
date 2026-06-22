@@ -86,22 +86,16 @@ def _resolve_from_cookie(request: Request) -> str | None:
     if not token:
         return None
     try:
-        from libs.supabase.supabase import SupabaseManager
-        supabase = SupabaseManager()
-        user_response = supabase.client.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="invalid session cookie",
-            )
-        return user_response.user.email or ""
-    except HTTPException:
-        raise
+        from apps.api.api.services.auth.provider import get_auth_provider
+        email = get_auth_provider().email_from_token(token)
     except Exception:
+        email = None
+    if not email:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or expired session cookie",
         )
+    return email
 
 
 def get_current_user(

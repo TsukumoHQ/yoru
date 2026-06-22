@@ -15,6 +15,7 @@ from uuid import UUID
 
 from libs.log_manager.controller import LoggingController
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 from apps.api.api.exceptions.domain_exceptions import NotFoundError, ValidationError
 from apps.api.api.models.notification.notification_models import (
     NotificationListResponse,
@@ -32,7 +33,7 @@ class NotificationService:
         supabase: SupabaseManager | None = None,
         logger: LoggingController | None = None,
     ):
-        self.supabase = supabase or SupabaseManager(access_token=access_token)
+        self.supabase = supabase or get_data_store(access_token=access_token)
         self.logger = logger or LoggingController(app_name="NotificationService")
 
     async def create_notification(

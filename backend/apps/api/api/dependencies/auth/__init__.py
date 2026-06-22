@@ -20,11 +20,25 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from libs.supabase.supabase import SupabaseManager
+from apps.api.api.services.auth.provider import get_auth_provider
 
 security = HTTPBearer()
 
 SESSION_COOKIE_NAME = "rcpt_session"
+
+
+async def _verify_token(token: str) -> UUID:
+    """Validate an access token via the configured auth provider.
+
+    Single seam for all auth vectors — works identically for the local,
+    dependency-free provider and the Supabase provider.
+    """
+    try:
+        return await get_auth_provider().verify_access_token(token)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 async def get_current_user_id(
@@ -54,16 +68,7 @@ async def get_current_user_id(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    supabase = SupabaseManager()
-    try:
-        user_response = supabase.client.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return UUID(user_response.user.id)
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return await _verify_token(token)
 
 
 async def get_current_user_token(request: Request) -> str:
@@ -100,16 +105,10 @@ async def get_current_user_id_from_cookie(request: Request) -> UUID:
     if not token:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    supabase = SupabaseManager()
     try:
-        user_response = supabase.client.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid session")
-        return UUID(user_response.user.id)
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
+        return await _verify_token(token)
+    except HTTPException as e:
+        raise HTTPException(status_code=401, detail="Invalid or expired session") from e
 
 
 async def get_current_user_id_or_cookie(
@@ -130,16 +129,7 @@ async def get_current_user_id_or_cookie(
     if not auth_header.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
     token = auth_header.split(" ", 1)[1].strip()
-    supabase = SupabaseManager()
-    try:
-        user_response = supabase.client.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return UUID(user_response.user.id)
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return await _verify_token(token)
 
 
 async def get_correlation_id(request: Request) -> str:
@@ -176,7 +166,6 @@ async def require_auth(
 async def require_admin(
     request: Request,
     user_id: UUID = Depends(get_current_user_id),
-    token: str = Depends(get_current_user_token),
 ) -> UUID:
     """
     FastAPI dependency that requires admin role.
@@ -184,7 +173,6 @@ async def require_admin(
     Args:
         request: The FastAPI request object
         user_id: The authenticated user ID
-        token: The JWT token
 
     Returns:
         UUID of the authenticated admin user
@@ -192,27 +180,13 @@ async def require_admin(
     Raises:
         HTTPException: 403 if user is not an admin
     """
-    supabase = SupabaseManager(access_token=token)
-
     try:
-        # Get user profile to check role
-        correlation_id = getattr(request.state, "correlation_id", "")
-        profile = supabase.get_record(
-            "profiles", str(user_id), correlation_id=correlation_id
-        )
-
-        if not profile or profile.get("role") != "admin":
-            raise HTTPException(
-                status_code=403,
-                detail="Admin access required",
-            )
-
-        return user_id
-
+        role = await get_auth_provider().get_user_role(user_id)
     except HTTPException:
         raise
-    except Exception:
-        raise HTTPException(
-            status_code=403,
-            detail="Unable to verify admin access",
-        )
+    except Exception as e:
+        raise HTTPException(status_code=403, detail="Unable to verify admin access") from e
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user_id

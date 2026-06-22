@@ -10,6 +10,7 @@ from uuid import UUID
 from libs.email import EmailManager
 from libs.log_manager.controller import LoggingController
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 from apps.api.api.exceptions.domain_exceptions import (
     AuthenticationError,
     ConflictError,
@@ -39,7 +40,7 @@ class InvitationService:
         logger: LoggingController | None = None,
         email_manager: EmailManager | None = None,
     ):
-        self.supabase = supabase or SupabaseManager()
+        self.supabase = supabase or get_data_store()
         self.auth_service = auth_service or AuthService()
         self.logger = logger or LoggingController(app_name="InvitationService")
         self.email_manager = email_manager or EmailManager()
@@ -72,7 +73,7 @@ class InvitationService:
         self.logger.log_info("Creating invitation", context)
 
         # Use authenticated Supabase client with user token for RLS
-        authenticated_supabase = SupabaseManager(access_token=access_token)
+        authenticated_supabase = get_data_store(access_token=access_token)
 
         try:
             # Check if email already exists by trying to get user by email
@@ -406,7 +407,7 @@ class InvitationService:
         self.logger.log_info("Listing sent invitations", context)
 
         # Use authenticated Supabase client with user token for RLS
-        authenticated_supabase = SupabaseManager(access_token=access_token)
+        authenticated_supabase = get_data_store(access_token=access_token)
 
         try:
             # Get all invitations sent by user
@@ -514,7 +515,7 @@ class InvitationService:
         self.logger.log_info("Cancelling invitation", context)
 
         # Use authenticated Supabase client with user token for RLS
-        authenticated_supabase = SupabaseManager(access_token=access_token)
+        authenticated_supabase = get_data_store(access_token=access_token)
 
         try:
             # Get invitation

@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 
 
 class RouteRuleIn(BaseModel):
@@ -45,7 +46,7 @@ async def list_route_rules(user_token: str, user_id: UUID) -> list[RouteRuleOut]
     """Return the caller's user-scope rules + any org-scope rules of orgs
     they belong to. RLS enforces the visibility.
     """
-    sb = SupabaseManager(access_token=user_token)
+    sb = get_data_store(access_token=user_token)
     try:
         rows = sb.query_records(
             "route_rules",
@@ -61,7 +62,7 @@ async def create_route_rule(
 ) -> RouteRuleOut:
     """Create a user-scope rule. Supabase RLS will reject any attempt to
     insert a row with `user_id != auth.uid()` or `scope != 'user'`."""
-    sb = SupabaseManager(access_token=user_token)
+    sb = get_data_store(access_token=user_token)
     payload = {
         "user_id": str(user_id),
         "scope": "user",
@@ -84,7 +85,7 @@ async def create_route_rule(
 
 async def delete_route_rule(user_token: str, rule_id: str) -> None:
     """Delete a user-scope rule. RLS policy only permits deleting own rules."""
-    sb = SupabaseManager(access_token=user_token)
+    sb = get_data_store(access_token=user_token)
     try:
         resp = sb.client.table("route_rules").delete().eq("id", rule_id).execute()
     except Exception as exc:

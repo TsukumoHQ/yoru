@@ -21,11 +21,16 @@ from apps.api.api.models.auth.auth_models import (
     SignUpRequest,
 )
 from apps.api.api.models.user.user_models import UserResponse
+from apps.api.api.services.auth.provider import AuthProvider
 from apps.api.api.services.organization.organization_service import OrganizationService
 
 
-class AuthService:
-    """Service for handling authentication operations."""
+class AuthService(AuthProvider):
+    """Supabase-backed implementation of :class:`AuthProvider`.
+
+    Selected when ``AUTH_PROVIDER=supabase``. The local, dependency-free
+    default lives in :class:`~apps.api.api.services.auth.local_provider.LocalAuthProvider`.
+    """
 
     def __init__(
         self,
@@ -378,6 +383,53 @@ class AuthService:
         except Exception as e:
             self.logger.log_exception(e, context)
             raise AuthenticationError("Token refresh failed", correlation_id) from e
+
+    async def verify_access_token(self, token: str) -> UUID:
+        """Validate an access token against Supabase and return the user id."""
+        user_response = self.supabase.client.auth.get_user(token)
+        if not user_response or not user_response.user:
+            raise AuthenticationError("Invalid token", "")
+        return UUID(user_response.user.id)
+
+    async def get_user(self, user_id: UUID) -> UserResponse | None:
+        """Return a user's profile from the Supabase ``profiles`` table."""
+        try:
+            profile = self.supabase.get_record(
+                "profiles", str(user_id), correlation_id=""
+            )
+        except Exception:
+            profile = None
+        if not profile:
+            return None
+        return UserResponse(
+            id=user_id,
+            email=profile.get("email", ""),
+            first_name=profile.get("first_name"),
+            last_name=profile.get("last_name"),
+            avatar_url=profile.get("avatar_url"),
+            locale=profile.get("locale", "en"),
+            timezone=profile.get("timezone", "UTC"),
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+
+    async def get_user_role(self, user_id: UUID) -> str | None:
+        try:
+            profile = self.supabase.get_record(
+                "profiles", str(user_id), correlation_id=""
+            )
+        except Exception:
+            return None
+        return profile.get("role") if profile else None
+
+    def email_from_token(self, token: str) -> str | None:
+        try:
+            user_response = self.supabase.client.auth.get_user(token)
+            if not user_response or not user_response.user:
+                return None
+            return user_response.user.email or ""
+        except Exception:
+            return None
 
     async def _validate_invitation_token(
         self, token: str, email: str, correlation_id: str

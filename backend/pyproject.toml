@@ -39,6 +39,7 @@ dependencies = [
     # --- Wave-13 rate limiting (in-process; v1 may move to Redis) ---
     "slowapi==0.1.9",
     "stripe>=15.0.1",
+    "psycopg[binary]>=3.1",
 ]
 
 [project.optional-dependencies]

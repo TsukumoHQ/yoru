@@ -29,6 +29,7 @@ from sqlmodel import Session as SQLSession, select
 from apps.api.api.dependencies.auth import get_current_user_id
 from libs.log_manager.controller import LoggingController
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 
 from .db import get_session
 from .models import (
@@ -63,7 +64,7 @@ def _resolve_scope(user_id: UUID) -> tuple[list[str], Optional[str]]:
     read trusted membership rows, no user-specific RLS scoping needed.
     """
     logger = LoggingController(app_name="DashboardRouter")
-    sb = SupabaseManager(enable_cache=False).client
+    sb = get_data_store(enable_cache=False).client
     user_id_str = str(user_id)
 
     caller_email: Optional[str] = None

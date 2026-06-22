@@ -23,6 +23,7 @@ from apps.api.api.core.ratelimit import limiter
 from libs.email.email_manager import EmailManager
 from libs.log_manager.controller import LoggingController
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 
 _SALES_EMAIL = os.environ.get("SALES_NOTIFY_EMAIL", "sales@yoru.sh")
 
@@ -47,7 +48,7 @@ def _service_role_supabase() -> SupabaseManager:
     SupabaseManager defaults to service_role since issue #48; this helper
     just disables cache for the one-shot insert.
     """
-    return SupabaseManager(enable_cache=False)
+    return get_data_store(enable_cache=False)
 
 
 def _hash_ip(ip: Optional[str]) -> Optional[str]:

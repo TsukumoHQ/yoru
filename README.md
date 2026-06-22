@@ -6,10 +6,22 @@ Audit trail for autonomous AI coding agents. Install a Claude Code hook, get a d
 
 ## Self-host, quick path
 
+No external services required. Auth and data both run inside the stack by
+default — SQLite on disk, password auth in-process. **No Supabase account, no
+cloud database, no SMTP needed to get running.**
+
 ```bash
 git clone https://github.com/yoru-sh/yoru.git && cd yoru
-cp backend/.env.example backend/.env   # fill in Supabase + SMTP
-docker compose up -d
+cp backend/.env.example backend/.env    # defaults work as-is
+make dev                                # api :8002 + dashboard :5173
+```
+
+Open the dashboard — on a fresh instance you land on a **first-run wizard** that
+creates your admin account (and lets you point at an existing database if you
+want one). Prefer the terminal? Run it headless:
+
+```bash
+make setup            # interactive: pick a DB, create the admin
 ```
 
 Then point the CLI at your instance:
@@ -19,13 +31,28 @@ pip install yoru-cli
 yoru init --server https://yoru.acme.com
 ```
 
-Full walkthrough with Supabase schema bootstrap, GitHub OAuth, and SMTP in [`docs/SELF-HOST.md`](docs/SELF-HOST.md).
+### Choose your stack
+
+Everything below is optional — the defaults are fully local.
+
+| Concern | Default (zero-config) | Bring your own |
+|---|---|---|
+| **Auth** | `AUTH_PROVIDER=local` — users in your DB, scrypt + JWT | `AUTH_PROVIDER=supabase` — hosted/self-hosted GoTrue (set `SUPABASE_*`) |
+| **Database** | bundled SQLite at `backend/data/receipt.db` | any Postgres — set `RECEIPT_DB_URL=postgres://…` (or paste it in the wizard) |
+| **Email** | none — welcome mail skipped | SMTP via `EMAIL_PROVIDER=smtp` + `SMTP_*` |
+
+The **first registered user becomes the admin.** For an internet-exposed
+instance, set `SETUP_TOKEN=<random>` so only someone holding the token can run
+the wizard. Pin `AUTH_JWT_SECRET` in production (the wizard does this for you).
+
+Full walkthrough — Postgres, GitHub OAuth, SMTP, and the Supabase path — in
+[`docs/SELF-HOST.md`](docs/SELF-HOST.md).
 
 ## Layout
 
 | Directory | What it is |
 |---|---|
-| `backend/` | FastAPI service — event ingest, red-flag detection, session scoring, Supabase-backed multi-tenant |
+| `backend/` | FastAPI service — event ingest, red-flag detection, session scoring; pluggable auth (local or Supabase) and database (SQLite or Postgres) |
 | `frontend/` | React dashboard (the app a self-hoster exposes to their team) |
 | `packages/receipt-ui/` | Shared component library consumed by `frontend/` |
 | `docs/` | Self-host guide, architecture, hook contract |

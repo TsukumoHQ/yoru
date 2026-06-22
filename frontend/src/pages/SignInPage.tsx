@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom"
 import { signin, AuthError } from "../lib/auth-api"
+import { getSetupStatus } from "../lib/setup-api"
 import { useSession } from "../auth/useSession"
 import { GithubOAuthButton } from "../auth/GithubOAuthButton"
 
@@ -38,7 +39,19 @@ export function SignInPage() {
   const [err, setErr] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  // Fresh self-hosted instance with no admin yet → send the first visitor to
+  // the onboarding wizard instead of an unusable sign-in form.
+  const [needsSetup, setNeedsSetup] = useState(false)
+  useEffect(() => {
+    getSetupStatus()
+      .then((s) => setNeedsSetup(s.needs_setup))
+      .catch(() => {
+        /* API unreachable — leave the form up; the error surfaces on submit. */
+      })
+  }, [])
+
   if (loading) return null
+  if (needsSetup) return <Navigate to="/setup" replace />
   if (user) return <Navigate to={from ?? "/"} replace />
 
   async function onSubmit(e: FormEvent) {

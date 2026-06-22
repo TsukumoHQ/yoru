@@ -45,7 +45,7 @@ from apps.api.api.exceptions.domain_exceptions import (
 )
 from apps.api.api.models.auth.auth_models import SignInRequest, SignUpRequest
 from apps.api.api.models.user.user_models import UserResponse
-from apps.api.api.services.auth.auth_service import AuthService
+from apps.api.api.services.auth.provider import AuthProvider, get_auth_provider
 from libs.log_manager.controller import LoggingController
 from libs.supabase.supabase import SupabaseManager
 
@@ -161,11 +161,11 @@ class CookieAuthRouter:
     def __init__(self) -> None:
         self.logger = LoggingController(app_name="CookieAuthRouter")
         self.router = APIRouter(prefix="/auth", tags=["auth:cookie"])
-        self._service: AuthService | None = None
+        self._service: AuthProvider | None = None
         self._setup_routes()
 
     def initialize_services(self) -> None:
-        self._service = AuthService()
+        self._service = get_auth_provider()
 
     def get_router(self) -> APIRouter:
         return self.router
@@ -186,7 +186,7 @@ class CookieAuthRouter:
         correlation_id: str = Depends(get_correlation_id),
     ) -> SessionUserResponse:
         if self._service is None:
-            self._service = AuthService()
+            self._service = get_auth_provider()
         signup_request = SignUpRequest(
             email=data.email,
             password=data.password,
@@ -214,7 +214,7 @@ class CookieAuthRouter:
         correlation_id: str = Depends(get_correlation_id),
     ) -> SessionUserResponse:
         if self._service is None:
-            self._service = AuthService()
+            self._service = get_auth_provider()
         try:
             auth_response = await self._service.sign_in(data, correlation_id)
         except AuthenticationError as e:
@@ -357,7 +357,7 @@ class CookieAuthRouter:
         correlation_id: str = Depends(get_correlation_id),
     ) -> SessionUserResponse:
         if self._service is None:
-            self._service = AuthService()
+            self._service = get_auth_provider()
         refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
         if not refresh_token:
             raise HTTPException(status_code=401, detail="No refresh cookie")
@@ -388,22 +388,17 @@ class CookieAuthRouter:
         grants, groups, group features), the SPA calls the SaaSForge `/me`
         surface mounted separately.
         """
-        supabase = SupabaseManager()
-        profile: dict | None = None
-        try:
-            profile = supabase.get_record("profiles", str(user_id), correlation_id="")
-        except Exception:
-            profile = None
-        p = profile or {}
+        if self._service is None:
+            self._service = get_auth_provider()
+        user = await self._service.get_user(user_id)
+        if user is not None:
+            return SessionUserResponse(user=user)
+        # Cookie validated but no profile row — return a minimal shell so the
+        # SPA can still initialise its auth state.
         return SessionUserResponse(
             user=UserResponse(
                 id=user_id,
-                email=p.get("email", ""),
-                first_name=p.get("first_name"),
-                last_name=p.get("last_name"),
-                avatar_url=p.get("avatar_url"),
-                locale=p.get("locale", "en"),
-                timezone=p.get("timezone", "UTC"),
+                email="",
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
             )

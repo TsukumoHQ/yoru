@@ -10,13 +10,14 @@ FRONTEND  := frontend
 MARKETING := marketing
 
 .PHONY: help install install-backend install-frontend dev dev-backend dev-frontend \
-        dev-marketing build-marketing \
+        dev-marketing build-marketing setup \
         test test-backend test-frontend smoke lint lint-backend lint-frontend build \
         build-backend build-frontend clean down restart-backend
 
 help:
 	@echo "overnight-saas — make targets"
 	@echo "  install   uv sync (backend) + npm ci (frontend)"
+	@echo "  setup     first-run onboarding (create admin + pick database)"
 	@echo "  dev       docker compose up (api + frontend dev server)"
 	@echo "  test      pytest (backend) + npm run test (frontend)"
 	@echo "  lint      ruff (backend) + tsc --noEmit (frontend)"
@@ -25,6 +26,9 @@ help:
 	@echo "  clean     remove .venv, node_modules, dist, __pycache__"
 
 install: install-backend install-frontend
+
+setup:  ## First-run onboarding — create the admin account + pick a database
+	cd $(BACKEND) && uv run python scripts/setup.py
 
 install-backend:
 	cd $(BACKEND) && uv sync

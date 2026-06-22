@@ -6,6 +6,7 @@ from uuid import UUID
 
 from libs.log_manager.controller import LoggingController
 from libs.supabase.supabase import SupabaseManager
+from libs.datastore import get_data_store
 from apps.api.api.exceptions.domain_exceptions import NotFoundError, ValidationError
 from apps.api.api.models.subscription.plan_models import (
     FeatureValueUpdate,
@@ -25,7 +26,7 @@ class PlanService:
         supabase: SupabaseManager | None = None,
         logger: LoggingController | None = None,
     ):
-        self.supabase = supabase or SupabaseManager(access_token=access_token)
+        self.supabase = supabase or get_data_store(access_token=access_token)
         self.logger = logger or LoggingController(app_name="PlanService")
 
     async def create_plan(

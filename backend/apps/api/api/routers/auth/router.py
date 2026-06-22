@@ -12,7 +12,7 @@ from apps.api.api.models.auth.auth_models import (
     SignInRequest,
     SignUpRequest,
 )
-from apps.api.api.services.auth.auth_service import AuthService
+from apps.api.api.services.auth.provider import AuthProvider, get_auth_provider
 
 
 class AuthRouter:
@@ -21,12 +21,12 @@ class AuthRouter:
     def __init__(self):
         self.logger = LoggingController(app_name="AuthRouter")
         self.router = APIRouter(prefix="/auth", tags=["auth"])
-        self.auth_service: AuthService | None = None
+        self.auth_service: AuthProvider | None = None
         self._setup_routes()
 
     def initialize_services(self):
         """Initialize required services."""
-        self.auth_service = AuthService()
+        self.auth_service = get_auth_provider()
 
     def get_router(self) -> APIRouter:
         """Get the FastAPI router."""

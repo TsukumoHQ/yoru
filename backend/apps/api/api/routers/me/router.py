@@ -445,10 +445,11 @@ class MeRouter:
         Returns {key, value, source, type}. `source` is one of
         'grant' | 'plan' | 'default' | 'unknown'.
         """
-        from libs.supabase.supabase import SupabaseManager
         from datetime import datetime, timezone
 
-        sb = SupabaseManager(access_token=token)
+        from libs.datastore import get_data_store
+
+        sb = get_data_store(access_token=token)
         feats = sb.query_records("features", filters={"key": feature_key})
         if not feats:
             return {"key": feature_key, "value": None, "source": "unknown", "type": None}

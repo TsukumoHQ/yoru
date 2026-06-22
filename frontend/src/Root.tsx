@@ -21,6 +21,7 @@ import { TokensPage } from "./pages/TokensPage"
 import { WorkspacesPage } from "./pages/WorkspacesPage"
 import { SessionDetailPage } from "./pages/SessionDetailPage"
 import { SessionsListPage } from "./pages/SessionsListPage"
+import { SetupPage } from "./pages/SetupPage"
 import { SignInPage } from "./pages/SignInPage"
 import { SignUpPage } from "./pages/SignUpPage"
 import { SmokePage } from "./pages/SmokePage"
@@ -31,6 +32,7 @@ import { queryClient } from "./lib/queryClient"
 // land on the Swiss-styled ErrorPage instead of React Router's default
 // "Hey developer" placeholder.
 const router = createBrowserRouter([
+  { path: "/setup", element: <SetupPage />, errorElement: <ErrorPage /> },
   { path: "/signin", element: <SignInPage />, errorElement: <ErrorPage /> },
   { path: "/signup", element: <SignUpPage />, errorElement: <ErrorPage /> },
   { path: "/auth/callback", element: <AuthCallback />, errorElement: <ErrorPage /> },
