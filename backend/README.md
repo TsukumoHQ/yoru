@@ -1,4 +1,4 @@
-# SaaSForge Project
+# Yoru Project
 
 A production-ready SaaS application built with FastAPI, featuring multi-tenancy, RBAC, rate limiting, and comprehensive observability.
 
@@ -15,7 +15,7 @@ A production-ready SaaS application built with FastAPI, featuring multi-tenancy,
 
 ## Environment Configuration
 
-SaaSForge supports separate configurations for development and production environments, each optimized for its specific use case.
+Yoru supports separate configurations for development and production environments, each optimized for its specific use case.
 
 ### Environment Comparison
 

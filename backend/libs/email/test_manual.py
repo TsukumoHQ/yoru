@@ -42,7 +42,7 @@ async def test_simple_email():
         print("\n2. Sending simple test email...")
         success = await email.send_simple(
             to_email=input("Enter recipient email: "),
-            subject="SaaSForge Email Service Test",
+            subject="Yoru Email Service Test",
             html_body="""
                 <h1>Email Service Test</h1>
                 <p>If you're reading this, the email service is working!</p>
@@ -86,7 +86,7 @@ async def test_templated_email():
         success = await email.send_template(
             template_name="invitation.html",
             to_email=to_email,
-            subject="You've been invited to join SaaSForge",
+            subject="You've been invited to join Yoru",
             context={
                 "inviter_name": "Test User",
                 "inviter_email": "test@example.com",
@@ -189,7 +189,7 @@ async def main():
     """Run all tests."""
     print("\n")
     print("╔" + "=" * 58 + "╗")
-    print("║" + " " * 12 + "SaaSForge Email Service Test" + " " * 17 + "║")
+    print("║" + " " * 12 + "Yoru Email Service Test" + " " * 17 + "║")
     print("╚" + "=" * 58 + "╝")
     print()
 

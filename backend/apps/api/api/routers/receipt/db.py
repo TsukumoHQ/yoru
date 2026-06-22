@@ -43,7 +43,7 @@ def init_db() -> None:
     from .auth_sessions_model import AuthSession as _AS  # noqa: F401
     # Local-auth user table (used when AUTH_PROVIDER=local).
     from apps.api.api.services.auth.local_models import AuthUser as _AU  # noqa: F401
-    # Local document store backing the SaaSForge surface (AUTH_PROVIDER=local).
+    # Local document store backing the Yoru surface (AUTH_PROVIDER=local).
     from libs.datastore.local_store import DataRecord as _DR  # noqa: F401
     SQLModel.metadata.create_all(engine)
 

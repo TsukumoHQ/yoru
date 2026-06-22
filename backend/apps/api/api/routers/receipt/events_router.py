@@ -115,6 +115,16 @@ def _infer_kind(tool: str | None) -> EventKind:
     return "tool_use"
 
 
+def _billing_enabled() -> bool:
+    """Whether the monthly ingest quota/paywall applies.
+
+    Off by default: a self-hosted instance has no billing, and dropping audit
+    records past a free-tier cap would silently lose data (and evidence). Only
+    the hosted/billed deployment sets BILLING_ENABLED=true.
+    """
+    return os.getenv("BILLING_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+
+
 def _month_start_utc() -> datetime:
     """First instant of the current UTC calendar month, naive (SQLite-safe)."""
     now = datetime.now(timezone.utc)
@@ -223,7 +233,7 @@ class EventsRouter:
         # present; falls back to the first event's `user` for v0 trust-body
         # callers (scripts/smoke-us14.sh) so those still get rate-limited.
         quota_user = current_user or (batch.events[0].user if batch.events else None)
-        if quota_user is not None:
+        if _billing_enabled() and quota_user is not None:
             org_id = _resolve_quota_org_id(quota_user)
             org = session.get(Org, org_id)
             plan = org.plan if org is not None else "free"

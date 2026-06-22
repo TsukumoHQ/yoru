@@ -61,7 +61,7 @@ def clean_db():
 
     Order matters: events has a FK to sessions, so events must go first.
     hook_tokens is independent but listed last to match the brief.
-    Untouched: any non-receipt table (alembic, SaaSForge residue, etc.).
+    Untouched: any non-receipt table (alembic, Yoru residue, etc.).
 
     Guardrail: refuses to run against a DB whose URL doesn't look like a test
     DB (see `_assert_test_db`). This prevents the fixture from truncating the

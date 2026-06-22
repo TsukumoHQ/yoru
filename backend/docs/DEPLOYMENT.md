@@ -1,6 +1,6 @@
 # Production Deployment Guide
 
-Complete guide for deploying SaaSForge to production on Ubuntu/Debian servers with Docker Compose.
+Complete guide for deploying Yoru to production on Ubuntu/Debian servers with Docker Compose.
 
 ## Table of Contents
 
@@ -69,8 +69,8 @@ docker compose version
 
 ```bash
 # Create dedicated user for the application
-sudo useradd -m -s /bin/bash -G docker saasforge
-sudo su - saasforge
+sudo useradd -m -s /bin/bash -G docker yoru
+sudo su - yoru
 ```
 
 ---
@@ -662,7 +662,7 @@ Before going live, verify:
 
 ## Support
 
-For issues specific to SaaSForge:
+For issues specific to Yoru:
 - GitHub Issues: [your-repo-url]
 - Documentation: [your-docs-url]
 

@@ -305,7 +305,7 @@ async def promote_workspace(
     new_org = org_rows[0]
 
     # Add the creator as owner in organization_members (normally handled by a
-    # trigger on orgs.create in SaaSForge; doing it explicitly here in case).
+    # trigger on orgs.create in Yoru; doing it explicitly here in case).
     try:
         sb.client.table("organization_members").insert({
             "org_id": new_org["id"],

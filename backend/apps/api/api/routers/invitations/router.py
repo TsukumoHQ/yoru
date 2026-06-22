@@ -26,11 +26,14 @@ class InvitationsRouter:
     def __init__(self):
         self.logger = LoggingController(app_name="InvitationsRouter")
         self.router = APIRouter(prefix="/invitations", tags=["invitations"])
-        self.invitation_service: InvitationService | None = None
+        # Build eagerly — main.py mounts this router without calling
+        # initialize_services(), so a lazy None left every endpoint 500-ing.
+        # Safe now that InvitationService no longer constructs Supabase/SMTP eagerly.
+        self.invitation_service: InvitationService = InvitationService()
         self._setup_routes()
 
     def initialize_services(self):
-        """Initialize required services."""
+        """Initialize required services (idempotent)."""
         self.invitation_service = InvitationService()
 
     def get_router(self) -> APIRouter:

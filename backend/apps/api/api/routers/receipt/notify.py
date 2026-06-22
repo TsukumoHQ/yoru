@@ -1,6 +1,6 @@
 """Fire-and-forget notification helper for Receipt ingest paths.
 
-Why not use SaaSForge's NotificationService directly?
+Why not use Yoru's NotificationService directly?
 - Events ingest authenticates via CLI hook-token (rcpt_*), not a Supabase JWT.
 - Inserting into `public.notifications` with RLS needs a user JWT OR the
   service_role key OR a SECURITY DEFINER bypass. We chose the last — the

@@ -5,7 +5,7 @@ Resolution order (highest priority first):
   2. subscription → plan_features — what the user's active plan grants
   3. features.default_value       — fallback for unplanned users
 
-The SaaSForge feature-check middleware (`middleware/feature_check.py`) was
+The Yoru feature-check middleware (`middleware/feature_check.py`) was
 designed to read `request.state.required_feature` set by this dep, but
 `BaseHTTPMiddleware.dispatch()` runs before route dependencies resolve, so
 the state is always empty when the middleware reads it. We do the check

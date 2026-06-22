@@ -1,6 +1,6 @@
 """FastAPI entry point — Receipt v0.
 
-Scope: session ingestion + list/detail/summary APIs only. The SaaSForge
+Scope: session ingestion + list/detail/summary APIs only. The Yoru
 machinery (auth, multi-tenancy, subscriptions, tracing, redis, email) is
 disabled — Receipt doesn't need it for the overnight wedge. Original
 main.py is preserved at main_saasforge.py.bak for post-v0 reactivation.
@@ -205,7 +205,7 @@ cookie_auth_router = CookieAuthRouter()
 # hard-fail when SUPABASE_URL is unset in a boot path that never touches auth.
 app.include_router(cookie_auth_router.get_router(), prefix="/api/v1")
 
-# SaaSForge SaaS surface — canonical routers from the forge template. All
+# Yoru SaaS surface — canonical routers from the forge template. All
 # mounted now that the underlying schemas (profiles / plans / orgs / groups /
 # subscriptions / invitations / notifications / webhooks) live on Supabase.
 # Auth deps (`get_current_user_id`, `get_current_user_token`) are poly —

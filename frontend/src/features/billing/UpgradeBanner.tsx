@@ -14,7 +14,7 @@ import { toast } from "../../components/Toaster"
 // pending backend US-18 — on 404/5xx we fall back to a non-exceeded state
 // so the banner stays hidden in dev. A 402 from any other endpoint flips
 // the shared cache via apiFetch's interceptor — we pick it up on next read.
-// SaaSForge exposes `/me/subscription` which returns the active SubscriptionResponse
+// Yoru exposes `/me/subscription` which returns the active SubscriptionResponse
 // with plan_name + features. We normalize to the OrgsMe shape the UI expects.
 interface MeSubscriptionRaw {
   plan_name?: string
@@ -26,7 +26,7 @@ async function fetchOrgsMe(): Promise<OrgsMe> {
   try {
     const sub = await apiFetch<MeSubscriptionRaw | null>("/me/subscription")
     const plan = (sub?.plan_name ?? "Free").toLowerCase()
-    // Map SaaSForge plan names → the legacy OrgsMe.plan union.
+    // Map Yoru plan names → the legacy OrgsMe.plan union.
     const planKey: Plan =
       plan === "pro" || plan === "team" || plan === "org"
         ? (plan as Plan)

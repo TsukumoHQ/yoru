@@ -1,6 +1,6 @@
 """Pluggable data layer.
 
-The whole SaaSForge surface (orgs, workspaces, subscriptions, plans,
+The whole Yoru surface (orgs, workspaces, subscriptions, plans,
 notifications, invitations, groups, webhooks…) talks to a uniform table-CRUD
 API that historically only had one implementation: Supabase/PostgREST.
 

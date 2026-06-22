@@ -1,6 +1,6 @@
-"""Secrets management guide for SaaSForge.
+"""Secrets management guide for Yoru.
 
-SaaSForge uses a simple approach to secrets management:
+Yoru uses a simple approach to secrets management:
 
 ## Development
 - Use .env files in docker/config/env/ directory
@@ -77,7 +77,7 @@ Several options depending on your deployment platform:
 
 ## No External Dependencies Required
 
-Unlike some frameworks, SaaSForge doesn't force you to use:
+Unlike some frameworks, Yoru doesn't force you to use:
 - AWS Secrets Manager (costly, AWS-specific)
 - HashiCorp Vault (complex setup, overkill for most projects)
 - Cloud-specific key management services

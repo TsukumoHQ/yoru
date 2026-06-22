@@ -2,7 +2,7 @@
 
 Brief asked for signup → login → /me → logout against `/api/v1/auth/...`.
 Live `apps/api/main.py` mounts Receipt's hook-token AuthRouter, NOT the
-SaaSForge signup/login routers (which exist on disk under
+Yoru signup/login routers (which exist on disk under
 `api/routers/auth/router.py` + `api/routers/me/router.py` but are never
 included). Per brief: "If the exact endpoint paths differ … grep the real
 paths and match the real shape … Do NOT invent endpoints; only test what

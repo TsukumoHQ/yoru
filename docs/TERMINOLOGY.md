@@ -29,7 +29,7 @@ A user Free can have 1 personal workspace AND be a member of a Team-plan org wit
 | **Plan "Team"** | `plans.name = 'Team'` | $19/seat/mo. 2–20 seats. 100k events/seat/mo pooled. Unlimited personal workspaces. |
 | **Plan "Org"** | `plans.name = 'Org'` | $99 base + $15/seat/mo. Unlimited seats. SSO, SCIM, signed audit export. |
 | **Subscription** | `subscriptions` | The live contract between a user and a plan. |
-| **Feature** | `features` / `plan_features` / `user_grants` | SaaSForge feature catalog. `workspaces_max` (quota), `github_integration` (flag), `seats_max`, `events_per_month`, `retention_days`. Resolved via `user_grants → plan_features → default_value`. |
+| **Feature** | `features` / `plan_features` / `user_grants` | Yoru feature catalog. `workspaces_max` (quota), `github_integration` (flag), `seats_max`, `events_per_month`, `retention_days`. Resolved via `user_grants → plan_features → default_value`. |
 | **CLI user token** | `cli_tokens.token_type = 'user'` | `rcpt_u_*`. Minted by device-code pairing. Bound to a human. Dies if human leaves all orgs. |
 | **CLI service token** | `cli_tokens.token_type = 'service'` | `rcpt_s_*`. Minted by an org admin. `workspace_id` set. Survives user departures. For CI/servers/fleet. |
 | **Event** | `events` (SQLite) | One Claude Code hook firing. Has `cwd`, `git_remote`, `git_branch`, `kind`, `tool`, `content`, `flags`, `raw`. |

@@ -385,7 +385,7 @@ class CookieAuthRouter:
 
         This endpoint is intentionally lightweight — it only proves the cookie
         is valid and returns the profile row. For full CRUD (PATCH, subscription,
-        grants, groups, group features), the SPA calls the SaaSForge `/me`
+        grants, groups, group features), the SPA calls the Yoru `/me`
         surface mounted separately.
         """
         if self._service is None:

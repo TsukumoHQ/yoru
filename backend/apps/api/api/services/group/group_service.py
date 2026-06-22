@@ -657,15 +657,29 @@ class UserGroupService:
         self.logger.log_info("Getting user groups", context)
 
         try:
-            # Single RPC call (replaces 1+2N queries)
-            result = self.supabase.execute_rpc(
-                "get_user_groups_with_details",
-                params={"p_user_id": str(user_id)},
+            # Provider-agnostic aggregation (replaces the Postgres RPC, which the
+            # local data store can't run). Memberships → groups → member counts.
+            memberships = self.supabase.query_records(
+                "user_group_members",
+                filters={"user_id": str(user_id)},
                 correlation_id=correlation_id,
-                cache_ttl=300,  # 5 minutes
             )
-
-            return [UserGroupResponse(**group) for group in result]
+            group_ids = [m["group_id"] for m in memberships if m.get("group_id")]
+            out: list[UserGroupResponse] = []
+            for gid in group_ids:
+                group = self.supabase.get_record(
+                    "user_groups", gid, correlation_id=correlation_id
+                )
+                if not group:
+                    continue
+                group = dict(group)
+                group["member_count"] = self.supabase.count_records(
+                    "user_group_members",
+                    filters={"group_id": gid},
+                    correlation_id=correlation_id,
+                )
+                out.append(UserGroupResponse(**group))
+            return out
         except Exception as e:
             context["error"] = str(e)
             self.logger.log_error("Failed to get user groups", context)
@@ -684,28 +698,34 @@ class UserGroupService:
         self.logger.log_info("Getting user features via groups", context)
 
         try:
-            # Use the SQL function to get features
-            result = (
-                self.supabase.client.rpc(
-                    "get_user_features_via_groups", {"p_user_id": str(user_id)}
-                )
-                .execute()
+            # Provider-agnostic: user's groups → each group's features → feature meta.
+            memberships = self.supabase.query_records(
+                "user_group_members",
+                filters={"user_id": str(user_id)},
+                correlation_id=correlation_id,
             )
-
-            feature_responses = []
-            if result.data:
-                for feature_data in result.data:
+            group_ids = [m["group_id"] for m in memberships if m.get("group_id")]
+            feature_responses: list[GroupFeatureResponse] = []
+            for gid in group_ids:
+                gfs = self.supabase.query_records(
+                    "group_features",
+                    filters={"group_id": gid},
+                    correlation_id=correlation_id,
+                )
+                for gf in gfs:
+                    feat = self.supabase.get_record(
+                        "features", gf.get("feature_id"), correlation_id=correlation_id
+                    ) or {}
                     feature_responses.append(
                         GroupFeatureResponse(
-                            group_id=feature_data["group_id"],
-                            feature_id=feature_data["feature_id"],
-                            feature_key=feature_data["feature_key"],
-                            feature_name=feature_data["feature_name"],
-                            value=feature_data["value"],
-                            created_at=feature_data.get("created_at"),
+                            group_id=gid,
+                            feature_id=gf["feature_id"],
+                            feature_key=feat.get("key", gf.get("feature_key", "")),
+                            feature_name=feat.get("name", gf.get("feature_name", "")),
+                            value=gf.get("value"),
+                            created_at=gf.get("created_at"),
                         )
                     )
-
             return feature_responses
         except Exception as e:
             context["error"] = str(e)
@@ -731,18 +751,10 @@ class UserGroupService:
         self.logger.log_info("Checking user feature via groups", context)
 
         try:
-            # Use the SQL function to get feature value
-            result = (
-                self.supabase.client.rpc(
-                    "get_user_feature_via_groups",
-                    {"p_user_id": str(user_id), "p_feature_key": feature_key},
-                )
-                .execute()
-            )
-
-            if result.data and len(result.data) > 0:
-                return result.data[0]["value"]
-
+            # Provider-agnostic: scan the user's groups for the feature key.
+            for fr in await self.get_user_features_via_groups(user_id, correlation_id):
+                if fr.feature_key == feature_key:
+                    return fr.value
             return None
         except Exception as e:
             context["error"] = str(e)

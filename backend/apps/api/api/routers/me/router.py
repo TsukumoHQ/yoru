@@ -438,7 +438,7 @@ class MeRouter:
     ) -> dict:
         """Resolve a feature key's effective value for the current user.
 
-        Resolution order (via SupabaseManager + SaaSForge tables):
+        Resolution order (via SupabaseManager + Yoru tables):
             1. user_grants (admin override, with optional expiry)
             2. active subscription → plan_features
             3. features.default_value

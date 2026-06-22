@@ -148,7 +148,7 @@ class AuthService(AuthProvider):
                 await self.email_manager.send_template(
                     template_name="signup_confirmation.html",
                     to_email=data.email,
-                    subject=f"Welcome to {os.getenv('EMAIL_BRAND_NAME', 'SaaSForge')}!",
+                    subject=f"Welcome to {os.getenv('EMAIL_BRAND_NAME', 'Yoru')}!",
                     context={
                         "user_name": user_name,
                         "user_email": data.email,
@@ -219,7 +219,7 @@ class AuthService(AuthProvider):
                 raise AuthenticationError("Invalid credentials", correlation_id)
 
             # Profile is optional — the `public.profiles` table is part of the
-            # dormant SaaSForge org/user schemas (Phase 1). Signin must not
+            # dormant Yoru org/user schemas (Phase 1). Signin must not
             # depend on it: auth success is independent of metadata presence.
             profile: dict | None = None
             try:

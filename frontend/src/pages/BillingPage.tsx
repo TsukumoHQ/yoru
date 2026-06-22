@@ -30,7 +30,7 @@ interface Subscription {
   stripe_customer_id?: string | null
 }
 
-// Map a SaaSForge plan `name` ("Free" / "Pro" / "Team" / "Org") onto the
+// Map a Yoru plan `name` ("Free" / "Pro" / "Team" / "Org") onto the
 // POST /billing/checkout-session `plan` enum (lowercase, Polar SDK).
 const CHECKOUT_KEY: Record<string, Plan> = {
   Free: "free",

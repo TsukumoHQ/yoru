@@ -1,7 +1,7 @@
 [project]
 name = "overnight-saas-backend"
 version = "0.1.0"
-description = "Overnight SaaS FastAPI backend (scaffolded from SaaSForge template)."
+description = "Yoru — self-hosted audit trail for autonomous AI coding agents (FastAPI backend)."
 requires-python = ">=3.11,<3.13"
 readme = "README.md"
 

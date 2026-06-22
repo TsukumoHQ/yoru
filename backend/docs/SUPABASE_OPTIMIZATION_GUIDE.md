@@ -349,4 +349,4 @@ CREATE VIEW user_profiles AS SELECT * FROM profiles;
 
 **Version:** 1.0.0
 **Date:** 2026-01-18
-**Template:** SaaSForge
+**Template:** Yoru

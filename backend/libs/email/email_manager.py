@@ -39,7 +39,15 @@ class EmailManager:
         self.config = config or EmailConfig.from_env()
         self.logger = logger or LoggingController(app_name="EmailManager")
         self.template_manager = TemplateManager(logger=self.logger)
-        self.provider = self._initialize_provider()
+        # No provider creds (self-host without SMTP) → run disabled: construction
+        # succeeds and sends become logged no-ops, so services that build an
+        # EmailManager in __init__ don't crash and the dashboard stays up.
+        self.provider = None if self.config.disabled else self._initialize_provider()
+        if self.config.disabled:
+            self.logger.log_info(
+                "EmailManager disabled (no provider configured) — sends are no-ops",
+                {"component": "EmailManager"},
+            )
 
         self.logger.log_info(
             "EmailManager initialized",
@@ -139,6 +147,13 @@ class EmailManager:
             EmailSendError: If all retry attempts fail
             EmailTemplateError: If template rendering fails
         """
+        if self.config.disabled:
+            self.logger.log_info(
+                "Email send skipped — EmailManager disabled (no SMTP configured)",
+                {"component": "EmailManager", "to": to_email, "subject": subject},
+            )
+            return False
+
         if correlation_id is None:
             correlation_id = get_correlation_id()
 
@@ -271,6 +286,13 @@ class EmailManager:
         Raises:
             EmailSendError: If sending fails after retries
         """
+        if self.config.disabled:
+            self.logger.log_info(
+                "Email send skipped — EmailManager disabled (no SMTP configured)",
+                {"component": "EmailManager", "to": to_email, "subject": subject},
+            )
+            return False
+
         if correlation_id is None:
             correlation_id = get_correlation_id()
 

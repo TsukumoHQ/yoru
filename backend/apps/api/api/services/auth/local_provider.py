@@ -124,7 +124,7 @@ class LocalAuthProvider(AuthProvider):
 
     # ── helpers ──────────────────────────────────────────────────────────
     def _ensure_profile(self, u: AuthUser) -> None:
-        """Mirror the auth user into the `profiles` document the SaaSForge
+        """Mirror the auth user into the `profiles` document the Yoru
         surface (MeRouter, dashboard) reads. Idempotent — safe on every login,
         so it also self-heals accounts created via the setup wizard or a DB
         switch."""
@@ -148,7 +148,7 @@ class LocalAuthProvider(AuthProvider):
             store = get_data_store()
             store.upsert_record("profiles", doc)
             # `user_profiles_with_email` is a Postgres view (profiles ⋈ auth email)
-            # the SaaSForge user service reads; locally it's just another doc set.
+            # the Yoru user service reads; locally it's just another doc set.
             store.upsert_record("user_profiles_with_email", dict(doc))
         except Exception as e:  # never block auth on profile seeding
             self.logger.log_warning("profile seed failed", {"error": str(e)})

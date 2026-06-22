@@ -1,6 +1,6 @@
 # Email Service
 
-Robust email service for SaaSForge with multi-provider support (SMTP, SendGrid, Resend), Jinja2 templates, structured logging, and automatic retry.
+Robust email service for Yoru with multi-provider support (SMTP, SendGrid, Resend), Jinja2 templates, structured logging, and automatic retry.
 
 ## Features
 
@@ -40,8 +40,8 @@ SMTP_FROM_EMAIL=noreply@yourapp.com
 SMTP_FROM_NAME=YourApp
 
 # Template Context
-EMAIL_BRAND_NAME=SaaSForge
-EMAIL_SUPPORT_EMAIL=support@saasforge.com
+EMAIL_BRAND_NAME=Yoru
+EMAIL_SUPPORT_EMAIL=support@yoru.sh
 EMAIL_COMPANY_ADDRESS=123 Main St, City, Country
 
 # App URLs
@@ -323,7 +323,7 @@ libs/email/
 
 ## Code Quality
 
-Follows all SaaSForge Cursor rules:
+Follows all Yoru Cursor rules:
 
 - ✅ Modern type hints (`str | None` not `Optional[str]`)
 - ✅ No `print()`, only `LoggingController`

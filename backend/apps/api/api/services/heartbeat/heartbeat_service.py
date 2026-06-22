@@ -44,8 +44,20 @@ class HeartbeatService:
         logger: LoggingController | None = None,
     ):
         self.supabase = supabase or get_data_store(access_token=access_token)
-        self.redis = redis or RedisManager()
         self.logger = logger or LoggingController(app_name="HeartbeatService")
+        # Heartbeat/presence is a Redis-backed nicety. A self-host instance with
+        # no Redis must not 500 — degrade to "no presence info" instead.
+        if redis is not None:
+            self.redis = redis
+        else:
+            try:
+                self.redis = RedisManager()
+            except Exception as e:
+                self.redis = None
+                self.logger.log_warning(
+                    "Redis unavailable — heartbeat/presence disabled",
+                    {"component": "HeartbeatService", "error": str(e)},
+                )
 
     def _get_heartbeat_key(self, user_id: UUID | str) -> str:
         """Construire la clé Redis pour un user."""
@@ -75,6 +87,13 @@ class HeartbeatService:
         self.logger.log_debug("Recording heartbeat ping", context)
 
         now = datetime.now(timezone.utc)
+        if self.redis is None:
+            # Presence disabled (no Redis) — acknowledge without persisting.
+            return {
+                "status": "ok",
+                "presence": "disabled",
+                "next_ping_deadline": None,
+            }
         heartbeat_key = self._get_heartbeat_key(user_id)
 
         # Stocker le timestamp du dernier ping avec TTL
@@ -84,15 +103,21 @@ class HeartbeatService:
             "ping_count": 1,  # Reset à chaque ping
         }
 
-        await self.redis.set_value(
-            heartbeat_key,
-            heartbeat_data,
-            ex=self.HEARTBEAT_TTL,
-            correlation_id=correlation_id,
-        )
-
-        # Ajouter à l'ensemble des users actifs
-        await self.redis.client.sadd(self.ACTIVE_USERS_SET, str(user_id))
+        try:
+            await self.redis.set_value(
+                heartbeat_key,
+                heartbeat_data,
+                ex=self.HEARTBEAT_TTL,
+                correlation_id=correlation_id,
+            )
+            # Ajouter à l'ensemble des users actifs
+            await self.redis.client.sadd(self.ACTIVE_USERS_SET, str(user_id))
+        except Exception:
+            # Redis unreachable (self-host without Redis) → acknowledge the ping
+            # without persisting presence; fall through to the normal response.
+            self.logger.log_warning(
+                "Heartbeat persist skipped — Redis unavailable", context
+            )
 
         # Calculer deadline du prochain ping
         next_deadline = now.timestamp() + self.PING_INTERVAL_SECONDS
@@ -134,12 +159,19 @@ class HeartbeatService:
             "user_id": str(user_id),
         }
 
+        if self.redis is None:
+            return None  # presence disabled (no Redis)
+
         heartbeat_key = self._get_heartbeat_key(user_id)
-        heartbeat_data = await self.redis.get_value(
-            heartbeat_key,
-            decode_json=True,
-            correlation_id=correlation_id,
-        )
+        try:
+            heartbeat_data = await self.redis.get_value(
+                heartbeat_key,
+                decode_json=True,
+                correlation_id=correlation_id,
+            )
+        except Exception:
+            # Redis unreachable at call time (self-host without Redis) → degrade.
+            return None
 
         if not heartbeat_data:
             self.logger.log_debug("No heartbeat found for user", context)

@@ -28,6 +28,7 @@ from apps.api.api.models.invitation.invitation_models import (
 )
 from apps.api.api.models.user.user_models import UserResponse
 from apps.api.api.services.auth.auth_service import AuthService
+from apps.api.api.services.auth.provider import get_auth_provider
 
 
 class InvitationService:
@@ -41,7 +42,9 @@ class InvitationService:
         email_manager: EmailManager | None = None,
     ):
         self.supabase = supabase or get_data_store()
-        self.auth_service = auth_service or AuthService()
+        # Provider-backed (local or Supabase) — avoids eagerly building the
+        # Supabase-only AuthService, which crashes a local install at import.
+        self.auth_service = auth_service or get_auth_provider()
         self.logger = logger or LoggingController(app_name="InvitationService")
         self.email_manager = email_manager or EmailManager()
 
@@ -147,7 +150,7 @@ class InvitationService:
                 await self.email_manager.send_template(
                     template_name="invitation.html",
                     to_email=data.email,
-                    subject=f"You've been invited to join {os.getenv('EMAIL_BRAND_NAME', 'SaaSForge')}",
+                    subject=f"You've been invited to join {os.getenv('EMAIL_BRAND_NAME', 'Yoru')}",
                     context={
                         "inviter_name": inviter_name,
                         "inviter_email": invited_by_email,

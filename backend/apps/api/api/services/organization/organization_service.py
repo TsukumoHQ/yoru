@@ -936,7 +936,7 @@ class OrganizationService:
                 await self.email_manager.send_template(
                     template_name="organization_invitation.html",
                     to_email=data.email,
-                    subject=f"Join {org['name']} on {os.getenv('EMAIL_BRAND_NAME', 'SaaSForge')}",
+                    subject=f"Join {org['name']} on {os.getenv('EMAIL_BRAND_NAME', 'Yoru')}",
                     context={
                         "org_name": org["name"],
                         "inviter_name": inviter_name,
