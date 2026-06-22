@@ -1,7 +1,7 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { ApiError, getSession } from "../lib/api"
+import { ApiError, getSession, verifySession, type VerifyResult } from "../lib/api"
 import type { SessionDetail } from "../types/receipt"
 import { SessionHero } from "../features/sessions/SessionHero"
 import { FileChangedRail } from "../features/sessions/FileChangedRail"
@@ -62,6 +62,7 @@ function Receipt({ session }: { session: SessionDetail }) {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <main className="min-w-0 space-y-6">
         <SessionHero session={session} />
+        <IntegrityBadge sessionId={session.id} />
         <section
           aria-label="Timeline"
           className="rounded-sm border border-rule bg-surface"
@@ -75,6 +76,38 @@ function Receipt({ session }: { session: SessionDetail }) {
 }
 
 function noop() {}
+
+function IntegrityBadge({ sessionId }: { sessionId: string }) {
+  const [state, setState] = useState<{ loading: boolean; result: VerifyResult | null }>({ loading: false, result: null })
+  async function check() {
+    setState({ loading: true, result: null })
+    try {
+      setState({ loading: false, result: await verifySession(sessionId) })
+    } catch {
+      setState({ loading: false, result: null })
+    }
+  }
+  const r = state.result
+  return (
+    <div className="flex items-center gap-3 rounded-sm border border-rule bg-surface px-4 py-3">
+      <span className="font-mono text-micro uppercase tracking-wider text-ink-faint">Audit integrity</span>
+      {r && (
+        <span className={"font-mono text-caption " + (r.intact ? "text-accent-600" : "text-flag-env")}>
+          {r.intact
+            ? `✓ intact · ${r.verified}/${r.event_count} events verified`
+            : `✗ TAMPERED · chain broke at event ${r.broken_at_event_id}`}
+        </span>
+      )}
+      <button
+        onClick={() => { void check() }}
+        disabled={state.loading}
+        className="ml-auto rounded border border-rule px-2 py-1 text-caption text-ink-muted hover:bg-sunken disabled:opacity-50"
+      >
+        {state.loading ? "Verifying…" : "Verify chain"}
+      </button>
+    </div>
+  )
+}
 
 function LoadingState() {
   return (

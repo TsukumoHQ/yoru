@@ -48,6 +48,10 @@ class RoleUpdate(BaseModel):
     role: str = Field(pattern="^(user|admin)$")
 
 
+class RetentionUpdate(BaseModel):
+    days: int = Field(ge=0, le=36500, description="0 = keep forever")
+
+
 class EmailSettings(BaseModel):
     smtp_host: str = Field(min_length=1)
     smtp_port: int = 587
@@ -73,6 +77,9 @@ class InstanceAdminRouter:
         self.router.delete("/users/{user_id}", summary="Delete a user")(self.delete_user)
         self.router.get("/settings/email", summary="Email/SMTP status (masked)")(self.get_email)
         self.router.post("/settings/email", summary="Configure SMTP")(self.set_email)
+        self.router.get("/retention", summary="Data-retention policy")(self.get_retention)
+        self.router.post("/retention", summary="Set retention days (0 = keep forever)")(self.set_retention)
+        self.router.post("/retention/prune", summary="Delete data older than the policy now")(self.prune_now)
 
     # ── users ────────────────────────────────────────────────────────────
     def _require_local(self) -> None:
@@ -189,3 +196,24 @@ class InstanceAdminRouter:
         os.environ.update(updates)
         self.logger.log_info("Admin configured SMTP", {"host": body.smtp_host})
         return {"ok": True, "restart_required": False}
+
+    # ── retention ────────────────────────────────────────────────────────
+    async def get_retention(self, _admin: UUID = Depends(require_admin)) -> dict:
+        return {"retention_days": int(os.getenv("RETENTION_DAYS", "0"))}
+
+    async def set_retention(
+        self, body: RetentionUpdate, _admin: UUID = Depends(require_admin)
+    ) -> dict:
+        SetupService()._upsert_env({"RETENTION_DAYS": str(body.days)})
+        os.environ["RETENTION_DAYS"] = str(body.days)
+        return {"retention_days": body.days}
+
+    async def prune_now(self, _admin: UUID = Depends(require_admin)) -> dict:
+        days = int(os.getenv("RETENTION_DAYS", "0"))
+        if days <= 0:
+            return {"pruned_sessions": 0, "pruned_events": 0, "note": "retention disabled (keep forever)"}
+        from apps.api.api.services.retention import prune_older_than
+
+        result = prune_older_than(days)
+        self.logger.log_info("Admin pruned old data", result)
+        return result

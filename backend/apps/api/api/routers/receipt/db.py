@@ -90,6 +90,11 @@ def init_db() -> None:
             conn.execute(text("ALTER TABLE events ADD COLUMN git_remote TEXT"))
         if "git_branch" not in ev_cols:
             conn.execute(text("ALTER TABLE events ADD COLUMN git_branch TEXT"))
+        # Tamper-evident hash chain columns.
+        if "entry_hash" not in ev_cols:
+            conn.execute(text("ALTER TABLE events ADD COLUMN entry_hash TEXT"))
+        if "prev_hash" not in ev_cols:
+            conn.execute(text("ALTER TABLE events ADD COLUMN prev_hash TEXT"))
 
         # Phase B migration: hook_tokens → cli_tokens + type split. Idempotent.
         has_cli = conn.execute(text(

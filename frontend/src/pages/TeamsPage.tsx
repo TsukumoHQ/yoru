@@ -4,6 +4,7 @@ import {
   listUsers, createUser, setUserRole, deleteUser,
   listGroups, createGroup, addGroupMember,
   getEmailStatus, setEmailSettings,
+  getRetention, setRetention, pruneNow,
   type AdminUser, type Group,
 } from "../lib/admin-api"
 
@@ -34,7 +35,35 @@ export function TeamsPage() {
       <UsersSection users={users.data ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["admin"] })} />
       <GroupsSection groups={groups.data ?? []} users={users.data ?? []} onChange={() => qc.invalidateQueries({ queryKey: ["admin", "groups"] })} />
       <EmailSection configured={email.data?.configured ?? false} host={email.data?.smtp_host} />
+      <RetentionSection />
     </div>
+  )
+}
+
+function RetentionSection() {
+  const qc = useQueryClient()
+  const ret = useQuery({ queryKey: ["admin", "retention"], queryFn: getRetention })
+  const [days, setDays] = useState<number | null>(null)
+  const value = days ?? ret.data?.retention_days ?? 0
+  const save = useMutation({
+    mutationFn: () => setRetention(value),
+    onSuccess: () => { setDays(null); qc.invalidateQueries({ queryKey: ["admin", "retention"] }) },
+  })
+  const prune = useMutation({
+    mutationFn: pruneNow,
+    onSuccess: (r) => alert(`Pruned ${r.pruned_sessions} sessions / ${r.pruned_events} events.${r.note ? " " + r.note : ""}`),
+  })
+  return (
+    <section className={CARD}>
+      <h2 className="font-mono text-sm font-semibold text-ink">Data retention</h2>
+      <p className="mt-1 text-caption text-ink-muted">Delete sessions older than N days. 0 = keep forever (default).</p>
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="block"><span className={LABEL}>Retention (days)</span>
+          <input type="number" min={0} value={value} onChange={(e) => setDays(Number(e.target.value))} className={INPUT + " w-32"} /></label>
+        <button onClick={() => save.mutate()} disabled={save.isPending} className={BTN}>Save policy</button>
+        <button onClick={() => { if (confirm("Delete all data older than the policy now?")) prune.mutate() }} disabled={prune.isPending} className={BTN_GHOST}>Prune now</button>
+      </div>
+    </section>
   )
 }
 

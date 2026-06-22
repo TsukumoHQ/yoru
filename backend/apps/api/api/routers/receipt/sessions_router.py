@@ -321,6 +321,7 @@ class SessionsRouter:
         self.router.get("/{session_id}/trail", response_model=TrailOut)(
             self.get_session_trail
         )
+        self.router.get("/{session_id}/verify")(self.verify_session)
         self.router.delete("/{session_id}/tailer-events", status_code=204)(
             self.delete_tailer_events
         )
@@ -531,6 +532,66 @@ class SessionsRouter:
             exported_at=datetime.now(timezone.utc),
             schema_version="v0",
         )
+
+    def verify_session(
+        self,
+        session_id: str,
+        db: SQLSession = Depends(get_session),
+        current_user: str = Depends(require_current_user),
+    ) -> dict:
+        """Tamper-evidence: recompute the per-session hash chain and report
+        whether the audit trail is intact.
+
+        Returns ``intact: true`` only if every event's stored hash matches a
+        fresh recomputation AND the chain links are unbroken — so any post-hoc
+        edit, deletion, or reorder of events is detectable. This is what makes
+        the trail usable as evidence.
+        """
+        from .events_router import event_entry_hash
+
+        row = db.exec(
+            select(SessionRow).where(SessionRow.id == session_id)
+        ).first()
+        if not _session_visible(row, current_user):
+            raise HTTPException(status_code=404, detail="session not found")
+
+        events = db.exec(
+            select(Event)
+            .where(Event.session_id == session_id)
+            .order_by(Event.id.asc())
+        ).all()
+
+        prev = ""
+        verified = 0
+        unchained = 0
+        broken_at = None
+        for ev in events:
+            if ev.entry_hash is None:
+                # Pre-chain legacy event (ingested before tamper-evidence) —
+                # can't verify, but don't claim tampering.
+                unchained += 1
+                prev = ev.entry_hash or prev
+                continue
+            expected = event_entry_hash(
+                prev, ev.ts, ev.kind, ev.tool, ev.path, ev.content,
+                ev.tokens_input, ev.tokens_output, ev.cost_usd,
+            )
+            if expected != ev.entry_hash or (ev.prev_hash or "") != prev:
+                broken_at = ev.id
+                break
+            verified += 1
+            prev = ev.entry_hash
+
+        intact = broken_at is None
+        return {
+            "session_id": session_id,
+            "intact": intact,
+            "event_count": len(events),
+            "verified": verified,
+            "unchained_legacy": unchained,
+            "broken_at_event_id": broken_at,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     # ---- Issue #79 — public share toggle (authed, owner-only, idempotent) ----
 

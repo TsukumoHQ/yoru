@@ -57,3 +57,10 @@ export const setEmailSettings = (body: {
   smtp_host: string; smtp_port: number; smtp_username: string
   smtp_password: string; smtp_from_email: string; smtp_from_name?: string
 }) => apiFetch<{ ok: boolean }>("/admin/instance/settings/email", { method: "POST", body: JSON.stringify(body) })
+
+// ── retention ──
+export const getRetention = () => apiFetch<{ retention_days: number }>("/admin/instance/retention")
+export const setRetention = (days: number) =>
+  apiFetch<{ retention_days: number }>("/admin/instance/retention", { method: "POST", body: JSON.stringify({ days }) })
+export const pruneNow = () =>
+  apiFetch<{ pruned_sessions: number; pruned_events: number; note?: string }>("/admin/instance/retention/prune", { method: "POST" })

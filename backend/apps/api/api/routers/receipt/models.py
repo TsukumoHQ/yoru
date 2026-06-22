@@ -88,6 +88,12 @@ class Event(SQLModel, table=True):
     cwd: Optional[str] = Field(default=None)
     git_remote: Optional[str] = Field(default=None)
     git_branch: Optional[str] = Field(default=None)
+    # Tamper-evident hash chain (per session, ordered by id). `entry_hash` =
+    # sha256(prev_hash + canonical(event)); `prev_hash` links to the previous
+    # event. A later edit/delete/reorder breaks the chain — verifiable via
+    # GET /sessions/{id}/verify. This is what makes the trail court-usable.
+    entry_hash: Optional[str] = Field(default=None)
+    prev_hash: Optional[str] = Field(default=None)
 
 
 class CliToken(SQLModel, table=True):

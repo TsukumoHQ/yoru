@@ -115,6 +115,35 @@ def _infer_kind(tool: str | None) -> EventKind:
     return "tool_use"
 
 
+def event_entry_hash(prev_hash: str, ts, kind, tool, path, content,
+                     tokens_input, tokens_output, cost_usd) -> str:
+    """sha256 over the previous hash + this event's immutable content.
+
+    Shared by ingest (to write the chain) and the verifier (to recompute it),
+    so both sides hash identically. Volatile/derived fields (flags, raw,
+    summaries) are deliberately excluded — they can be recomputed.
+    """
+    import hashlib
+    import json
+
+    canonical = json.dumps(
+        {
+            "prev": prev_hash or "",
+            "ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            "kind": kind,
+            "tool": tool,
+            "path": path,
+            "content": content,
+            "ti": tokens_input,
+            "to": tokens_output,
+            "cost": cost_usd,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _billing_enabled() -> bool:
     """Whether the monthly ingest quota/paywall applies.
 
@@ -253,6 +282,10 @@ class EventsRouter:
                         },
                     )
 
+        # Per-session hash-chain tip. Seeded lazily from the last persisted
+        # event so the chain continues across batches.
+        chain_tip: dict[str, str] = {}
+
         for e in batch.events:
             effective_user = e.user or current_user
             if effective_user is None:
@@ -386,6 +419,21 @@ class EventsRouter:
                 sess.flagged = True
                 flagged_ids.add(sess.id)
 
+            # Tamper-evident chain: link each event to the previous one.
+            prev_hash = chain_tip.get(e.session_id)
+            if prev_hash is None:
+                last = session.exec(
+                    select(Event)
+                    .where(Event.session_id == e.session_id)
+                    .order_by(Event.id.desc())
+                ).first()
+                prev_hash = (last.entry_hash if last and last.entry_hash else "")
+            entry_hash = event_entry_hash(
+                prev_hash, ts, e.kind, e.tool, e.path, e.content,
+                e.tokens_input, e.tokens_output, e.cost_usd,
+            )
+            chain_tip[e.session_id] = entry_hash
+
             ev_row = Event(
                 session_id=e.session_id,
                 ts=ts,
@@ -401,6 +449,8 @@ class EventsRouter:
                 cwd=e.cwd,
                 git_remote=e.git_remote,
                 git_branch=e.git_branch,
+                prev_hash=prev_hash,
+                entry_hash=entry_hash,
             )
             session.add(ev_row)
             if flags and e.session_id not in first_flagged_event_id:

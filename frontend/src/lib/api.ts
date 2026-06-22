@@ -743,3 +743,17 @@ export function defaultAutoRoutePatterns(orgSlug: string): RouteRuleCreate[] {
   ]
 }
 
+
+export interface VerifyResult {
+  session_id: string
+  intact: boolean
+  event_count: number
+  verified: number
+  unchained_legacy: number
+  broken_at_event_id: number | null
+  checked_at: string
+}
+
+export function verifySession(id: string): Promise<VerifyResult> {
+  return apiFetch<VerifyResult>(`/sessions/${encodeURIComponent(id)}/verify`)
+}
