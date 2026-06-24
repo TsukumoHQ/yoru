@@ -2,7 +2,7 @@
 
 Audit trail for autonomous AI coding agents. Install a Claude Code hook, get a dashboard showing every tool call, file edit, and red-flag event your overnight agent ran — plus a per-session letter grade on Throughput, Reliability, and Safety.
 
-> **Don't want to host?** Yoru Cloud is free forever for one developer at [yoru.sh](https://yoru.sh). This repo is the AGPL-licensed server for self-hosting.
+> **Yoru is self-hosted.** You run the backend + dashboard on your own box; your session data never leaves your network. This repo is the AGPL-licensed server. There is no hosted Yoru.
 
 ## Self-host, quick path
 
@@ -12,7 +12,7 @@ cloud database, no SMTP needed to get running.**
 
 ```bash
 git clone https://github.com/yoru-sh/yoru.git && cd yoru
-cp backend/.env.example backend/.env    # defaults work as-is
+cp .env.example backend/.env            # root .env.example = self-host defaults, work as-is
 make dev                                # api :8002 + dashboard :5173
 ```
 
