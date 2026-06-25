@@ -1,219 +1,211 @@
 # Self-hosting Yoru
 
-Deploy Yoru inside your own infrastructure — your Supabase project, your
-servers, your domain. You keep the data, your team signs in against your
-identity system, no payloads leave your network. Nothing to buy; the AGPL
-license is all you need.
+**Yoru is self-hosted.** You run the backend + dashboard on your own box; your
+session data never leaves your network. This repo is the AGPL-licensed server —
+there is no hosted Yoru to sign up for. Everything below is about standing up
+*your* instance.
 
-> **Scope**: this guide covers the single-company self-host path (your own
-> Supabase + one backend box + a static frontend). A bare-metal zero-
-> dependency path — Postgres instead of Supabase, GoTrue instead of the
-> Supabase auth API — lands in Phase G. If you need it today, reach out
-> and we'll pair on it.
+The default stack is **fully local**: a bundled SQLite database on disk and
+in-process password auth. No Supabase, no cloud database, no SMTP, no external
+service of any kind is required to get running. Postgres, Supabase auth, SMTP,
+and GitHub OAuth are all **optional "bring your own" upgrades** you can layer on
+when you want them.
+
+> **Scope**: this guide covers the single-company self-host path — one backend
+> box, one static frontend, your domain. Local / bare-metal is the *default*,
+> not a future phase.
 
 ---
 
-## What you get vs. the Cloud tier
+## Quick local path (zero external services)
 
-| Feature | Cloud (yoru.sh) | Self-host |
+The fastest way to a running instance — no accounts, no provisioning:
+
+```bash
+git clone https://github.com/yoru-sh/yoru.git && cd yoru
+cp backend/.env.example backend/.env    # defaults work as-is
+make dev                                # api :8002 + dashboard :5173
+```
+
+Open the dashboard. On a fresh instance you land on a **first-run wizard** that
+creates your admin account (and optionally lets you point at an existing
+database). **The first registered user becomes the admin.**
+
+Prefer the terminal? Run the wizard headless — handy for CI / SSH installs with
+no browser:
+
+```bash
+make setup            # interactive: pick a DB, create the admin
+```
+
+That's it. With the defaults you now have:
+
+- **Database**: bundled SQLite at `backend/data/receipt.db` (the Docker image
+  uses `/app/data/receipt.db` — persist that volume).
+- **Auth**: `AUTH_PROVIDER=local` — users live in the app DB, passwords hashed
+  with scrypt, sessions signed with a JWT. No external identity provider.
+- **Billing**: off. `BILLING_ENABLED=false` (the default) means unlimited
+  ingest, no paywall, no Stripe.
+- **Email**: off. With no `SMTP_*` configured, invitations run in-app and email
+  sends become no-ops — the instance boots fine without SMTP.
+
+Then point the CLI at your instance (see [CLI pairing](#5-configure-the-cli-to-talk-to-your-backend)):
+
+```bash
+pip install yoru-cli
+yoru init --server https://yoru.acme.com
+```
+
+### Choose your stack
+
+Everything here is optional — the defaults are fully local.
+
+| Concern | Default (zero-config) | Bring your own |
 | --- | --- | --- |
-| Session capture + red flags + A–F scoring | ✓ | ✓ |
-| Multi-agent support (Claude Code today, Cursor/Aider coming) | ✓ | ✓ |
-| Workspaces + GitHub routing + route\_rules escape hatch | ✓ | ✓ |
-| Trail export + webhook dispatch | ✓ | ✓ |
-| Email templates (welcome / password-reset / invite / alert) | ✓ | ✓ |
-| **Plan & billing logic** | Stripe gated | All users default to Org — everything unlocked |
-| **Ops burden** | Zero (we run it) | You run the backend + Supabase + DNS |
+| **Database** | bundled SQLite (`RECEIPT_DB_URL=sqlite:///…`) | any Postgres — `RECEIPT_DB_URL=postgres://…` (or paste it in the wizard) |
+| **Auth** | `AUTH_PROVIDER=local` — users in your DB, scrypt + JWT | `AUTH_PROVIDER=supabase` — hosted/self-hosted GoTrue (set `SUPABASE_*`) |
+| **Email** | none — welcome/invite mail skipped | SMTP via `EMAIL_PROVIDER=smtp` + `SMTP_*` |
+| **Social sign-in** | n/a | GitHub OAuth (configured in your Supabase project) |
+| **Billing** | off — everything unlocked | n/a — self-host has no paywall |
 
-Same source, same features. The only difference is who runs the infra.
-
----
-
-## Prerequisites
-
-- A **Supabase project** you control (Supabase Cloud or self-hosted Supabase).
-  Free tier is fine to start; switch to Pro when you cross the free limits.
-- A **server or Fly.io / Render / Railway app** for the FastAPI backend.
-  ~512 MB RAM is enough for v0.
-- A **static host** (Vercel, Netlify, Cloudflare Pages, nginx) for the
-  React dashboard.
-- An **SMTP provider** (Resend, Postmark, Mailgun, your corporate SMTP).
-  Optional if you skip welcome / invite mails.
-- A **domain** with DNS control (three subdomains — e.g. `yoru.acme.com`,
-  `api.yoru.acme.com`, `app.yoru.acme.com` — or a single subdomain with
-  sub-paths, your call).
-- **Docker** on the backend box, and `psql` / Supabase CLI locally for the
-  initial schema bootstrap.
+For an internet-exposed instance, set `SETUP_TOKEN=<random>` so only someone
+holding the token can run the wizard, and pin `AUTH_JWT_SECRET` (the wizard does
+this for you; otherwise it auto-generates a stable secret at
+`backend/data/.auth_jwt_secret` on first boot).
 
 ---
 
-## 1. Bootstrap the Supabase schema
+## Environment variables
 
-The Yoru backend expects ~14 tables in `public` plus a handful of RPCs,
-views, and RLS policies. Apply them to your empty Supabase project:
+The backend is a single FastAPI app in `backend/`. The authoritative list lives
+in `.env.example`; the core knobs:
 
 ```bash
-# One-shot: export Yoru Cloud's schema into a portable SQL file, then
-# run it against your project. The dump contains public schema only —
-# auth.* is already present in every Supabase project.
+# === Core ===
+# App DB for sessions/events/hook-tokens AND (with local auth) users.
+# SQLite by default — Docker path uses four slashes (absolute /app/data/…).
+RECEIPT_DB_URL=sqlite:////app/data/receipt.db
+RECEIPT_VERSION=0.1.0
+ENV=production
 
-# Fastest path — use the Supabase CLI linked against your own project:
-supabase link --project-ref <your-project-ref>
-supabase db push   # if you cloned this repo, the migrations under
-                   # backend/migrations/ will apply in order
+# === Auth provider ===
+# 'local'   = self-contained dashboard auth (scrypt + JWT). No external service.
+# 'supabase'= delegate identity to a Supabase GoTrue project (fill the block below).
+AUTH_PROVIDER=local
 
-# Or, if you prefer one-file: concatenate and run
-cat backend/migrations/*.sql | psql "postgresql://postgres:<pwd>@<your-project>.supabase.co:5432/postgres"
+# Signing secret for local access tokens. Leave unset to auto-generate a stable
+# secret at backend/data/.auth_jwt_secret on first boot. SET EXPLICITLY in prod.
+# AUTH_JWT_SECRET=
+
+# === Billing ===
+# OFF by default for self-host: ingest is unlimited, no Stripe/paywall surfaces.
+BILLING_ENABLED=false
+
+# === Domain / CORS ===
+RECEIPT_DOMAIN=yoru.acme.com
+CORS_ALLOWED_ORIGINS=https://yoru.acme.com
+
+# === First-run wizard hardening (recommended when internet-exposed) ===
+# SETUP_TOKEN=<openssl rand -hex 24>
+
+# === Supabase (auth) — only when AUTH_PROVIDER=supabase ===
+# SUPABASE_URL=https://<your-project>.supabase.co
+# SUPABASE_ANON_KEY=<anon key>
+# SUPABASE_JWT_SECRET=<jwt secret>
+
+# === Email (SMTP) — only if you want welcome / invite mails ===
+# EMAIL_PROVIDER=smtp
+# EMAIL_BRAND_NAME=Yoru
+# EMAIL_SUPPORT_EMAIL=yoru@acme.com
+# EMAIL_COMPANY_ADDRESS="Acme, Paris"
+# SMTP_HOST=smtp.resend.com
+# SMTP_PORT=465
+# SMTP_USERNAME=resend
+# SMTP_PASSWORD=<re_... token>
+# SMTP_FROM_EMAIL=yoru@acme.com
+# SMTP_FROM_NAME=Yoru
+# SMTP_USE_TLS=true
 ```
-
-The repo ships these migrations:
-
-| File | Purpose |
-| --- | --- |
-| `organizations_schema.sql` | Multi-tenant orgs + membership + RLS |
-| `user_groups_schema.sql` | Role-based access (admin / member / viewer) |
-| `subscriptions_schema.sql` | Plans + features + user_grants overrides |
-| `invitations_schema.sql` | Signed invite links |
-| `notifications_schema.sql` | In-app notifications |
-| `webhooks_schema.sql` | Outbound webhook subscriptions |
-| `rate_limit_feature.sql` | Per-plan event rate limits |
-| `performance_optimization_views.sql` | `user_subscription_details` view |
-| `route_rules_schema.sql` | Workspace routing escape hatch |
-| `welcome_email_sent_at.sql` | Email idempotency column |
-| `sales_leads_schema.sql` | **Optional** — backs the `/api/v1/sales/contact` endpoint (Contact-Sales form on yoru.sh). Only apply if you plan to expose a public contact form against your instance. Most self-hosters can skip it. |
-
-After migrations, insert seed plans if your project doesn't already have them:
-
-```sql
-INSERT INTO public.plans (name, price, billing_period, is_active) VALUES
-  ('Free', 0,  'monthly', true),
-  ('Pro',  9,  'monthly', true),
-  ('Team', 19, 'monthly', true),
-  ('Org',  99, 'monthly', true)
-ON CONFLICT (name) DO NOTHING;
-```
-
-### Default new signups to Org (self-host only)
-
-On Cloud, new users land on Free and upgrade via Stripe. Self-hosters have
-no billing, so we default everyone to Org. Add this trigger to your SB:
-
-```sql
--- Replace the Cloud's default-Free trigger with a default-Org one.
-CREATE OR REPLACE FUNCTION public._selfhost_default_org_subscription()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_plan_id uuid;
-BEGIN
-    SELECT id INTO v_plan_id FROM public.plans
-     WHERE name = 'Org' AND is_active = true LIMIT 1;
-    IF v_plan_id IS NOT NULL THEN
-        INSERT INTO public.subscriptions (user_id, plan_id, status, start_date)
-        VALUES (NEW.id, v_plan_id, 'active', NOW());
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS _ensure_personal_org_per_user ON auth.users;
-CREATE TRIGGER _selfhost_default_org_on_signup
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION public._selfhost_default_org_subscription();
-```
-
-Every user signing up will now land on Org active with all features unlocked.
 
 ---
 
-## 2. Configure Supabase Auth
+## Bring your own (optional production upgrades)
 
-Cloud uses Supabase Auth for email/password + GitHub OAuth; you do the same.
+Reach for these only when the local defaults aren't enough. Each is independent
+— you can adopt Postgres without touching auth, add SMTP without touching the
+database, and so on.
 
-**Email/password** works out of the box, nothing to configure.
+### Postgres instead of SQLite
 
-**GitHub OAuth** (optional but strongly recommended for dev teams):
-
-1. Create a GitHub OAuth App at https://github.com/settings/applications/new
-   - Homepage URL: `https://app.yoru.acme.com`
-   - Authorization callback URL: **your Supabase project's** GitHub callback —
-     shown in the Supabase dashboard under Auth → Providers → GitHub
-2. In Supabase dashboard → Auth → Providers → **GitHub** → paste the
-   `client_id` + `client_secret` → toggle Enabled.
-3. Auth → URL Configuration:
-   - Site URL: `https://app.yoru.acme.com`
-   - Redirect URLs (add both):
-     - `https://api.yoru.acme.com/api/v1/auth/github/callback`
-     - `http://localhost:8000/api/v1/auth/github/callback` (for local dev)
-
----
-
-## 3. Deploy the backend
-
-### Environment variables
-
-The backend is a single FastAPI app in `backend/`. Copy `backend/.env.example`
-to `.env` and fill in:
+SQLite is fine for a single box. For multiple replicas, point-in-time backups,
+or higher write volume, swap in any Postgres by setting one variable:
 
 ```bash
-# --- Core ---
-APP_ENV=production
-ENVIRONMENT=production
-AUTH_JWT_SECRET=<openssl rand -base64 48>
-APP_URL=https://app.yoru.acme.com
-API_URL=https://api.yoru.acme.com
-CORS_ALLOWED_ORIGINS=https://app.yoru.acme.com,https://yoru.acme.com
-COOKIE_SECURE=true
-COOKIE_SAMESITE=none
-COOKIE_DOMAIN=.yoru.acme.com
-FRONTEND_ORIGIN=https://app.yoru.acme.com
+RECEIPT_DB_URL=postgres://user:pwd@db.internal:5432/yoru
+```
 
-# --- Supabase ---
+You can also paste the connection URL into the first-run wizard (web or
+`make setup`); it tests the connection before writing it. Switching the DB after
+setup requires a backend restart (`make down && make dev`). The schema is
+applied automatically on boot — no manual migration step.
+
+### Supabase auth instead of local auth
+
+If your team already authenticates against Supabase (or you want hosted/
+self-hosted GoTrue magic-links and social sign-in), set:
+
+```bash
+AUTH_PROVIDER=supabase
 SUPABASE_URL=https://<your-project>.supabase.co
 SUPABASE_ANON_KEY=<anon key>
-SUPABASE_SERVICE_ROLE_KEY=<service role key>
-
-# --- Data ---
-RECEIPT_DB_URL=sqlite:////data/receipt.db   # local SQLite, persist the volume
-
-# --- Email (skip the whole block if you don't want welcome / invite mails) ---
-EMAIL_PROVIDER=smtp
-EMAIL_BRAND_NAME=Yoru
-EMAIL_COMPANY_ADDRESS="Acme, Paris"
-EMAIL_SUPPORT_EMAIL=yoru@acme.com
-SMTP_HOST=smtp.resend.com
-SMTP_PORT=465
-SMTP_USERNAME=resend
-SMTP_PASSWORD=<re_... token>
-SMTP_FROM_EMAIL=yoru@acme.com
-SMTP_FROM_NAME=Yoru
-SMTP_USE_TLS=true
-
-# --- Stripe (LEAVE EMPTY for self-host) ---
-# Backend detects empty STRIPE_API_KEY and falls back to mock mode:
-# - BillingPage hides the "Upgrade" + "Manage subscription" buttons
-# - /billing/checkout-session and /billing/portal-session return a graceful
-#   mock URL instead of a 502
-STRIPE_API_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_PRO_PRICE_ID=
-STRIPE_PRO_ANNUAL_PRICE_ID=
-STRIPE_TEAM_PRICE_ID=
-STRIPE_TEAM_ANNUAL_PRICE_ID=
-STRIPE_PORTAL_CONFIG_ID=
-
-# --- GitHub OAuth (client_id/secret already live in your Supabase dashboard;
-# these two are only needed if you expose a legacy device-flow — optional) ---
-GITHUB_OAUTH_CLIENT_ID=
-GITHUB_OAUTH_CLIENT_SECRET=
+SUPABASE_JWT_SECRET=<jwt secret>
 ```
 
-### Build + run
+With `AUTH_PROVIDER=supabase`, the local first-run wizard is bypassed —
+identity is managed entirely in your Supabase project. Create users / configure
+providers in the Supabase dashboard rather than the Yoru wizard.
 
-Docker (recommended — same image we ship to Cloud):
+### GitHub OAuth (optional, via Supabase)
+
+Social sign-in rides on the Supabase auth path, so it's only relevant when
+`AUTH_PROVIDER=supabase`:
+
+1. Create a GitHub OAuth App at https://github.com/settings/applications/new
+   - Homepage URL: `https://yoru.acme.com`
+   - Authorization callback URL: **your Supabase project's** GitHub callback,
+     shown under Auth → Providers → GitHub.
+2. In the Supabase dashboard → Auth → Providers → **GitHub** → paste the
+   `client_id` + `client_secret` → toggle Enabled.
+3. Auth → URL Configuration:
+   - Site URL: `https://yoru.acme.com`
+   - Redirect URLs: your dashboard origin (plus `http://localhost:5173` for
+     local dev).
+
+### SMTP (optional, welcome / invite / alert mail)
+
+Without SMTP the instance runs fine and email sends are no-ops. To turn on
+transactional mail, set `EMAIL_PROVIDER=smtp` plus the `SMTP_*` block above
+(`SMTP_HOST` / `SMTP_USERNAME` / `SMTP_PASSWORD` must all be present for the
+provider to activate). Resend, Postmark, Mailgun, or your corporate SMTP all
+work. The `sendgrid` and `resend` providers are also supported via
+`SENDGRID_API_KEY` / `RESEND_API_KEY` respectively.
+
+### Billing — there is no paywall
+
+Self-host has **no billing**. `BILLING_ENABLED=false` (the default) means
+unlimited ingest and no plan gating; self-hosters effectively run with
+everything unlocked. Independently, if billing surfaces are ever toggled on, an
+empty `STRIPE_API_KEY` keeps the backend in **mock mode**:
+
+- the dashboard hides the "Upgrade" / "Manage subscription" buttons, and
+- `/billing/checkout-session` and `/billing/portal-session` return a graceful
+  mock URL instead of erroring.
+
+You never need a Stripe account to self-host.
+
+---
+
+## Deploy with Docker
 
 ```bash
 cd backend
@@ -228,14 +220,15 @@ docker run -d \
 ```
 
 The backend exposes `:8002` — put any TLS-terminating proxy in front of it
-(Caddy / nginx / Traefik). The `/data` volume holds the SQLite DB where
-session events are written; back it up with your normal snapshot rotation.
+(Caddy / nginx / Traefik). The `/data` volume holds the SQLite DB where session
+events (and, with local auth, your users) are written; back it up with your
+normal snapshot rotation.
 
-Health check: `curl https://api.yoru.acme.com/health` → `200`.
+Health check: `curl https://yoru.acme.com/health` → `200`.
 
 ---
 
-## 4. Deploy the frontend + marketing
+## Deploy the frontend + marketing
 
 Both are Vite apps. Build once, serve the `dist/` folder from anywhere.
 
@@ -244,21 +237,22 @@ Both are Vite apps. Build once, serve the `dist/` folder from anywhere.
 cd frontend
 cp .env.example .env.production
 # edit .env.production:
-#   VITE_API_URL=https://api.yoru.acme.com/api/v1
-#   VITE_MARKETING_URL=https://yoru.acme.com
+#   VITE_API_URL=https://yoru.acme.com/api/v1
+#   (only if using Supabase auth:)
 #   VITE_SUPABASE_URL=https://<your-project>.supabase.co
 #   VITE_SUPABASE_ANON_KEY=<anon>
 npm install
 npm run build
-# serve dist/ from Vercel / nginx / Cloudflare Pages / …
+# serve dist/ from nginx / Cloudflare Pages / Vercel / …
 
-# Marketing (optional — if you don't want a public landing page, skip it)
+# Marketing (optional — skip if you don't want a public landing page)
 cd ../marketing
 npm install
 npm run build
 ```
 
-If you use nginx, mount `dist/` as the web root and add SPA fallback:
+If you use nginx, mount `dist/` as the web root and add SPA fallback so deep
+links resolve:
 
 ```nginx
 location / {
@@ -270,43 +264,39 @@ location / {
 
 ## 5. Configure the CLI to talk to your backend
 
-Users of your self-hosted instance install the public CLI from PyPI and
-point it at your server:
+Users of your instance install the public CLI from PyPI and point it at your
+server. **`--server` is required** — there is no default server to fall back to:
 
 ```bash
 pip install yoru-cli
-yoru init --server https://api.yoru.acme.com
+yoru init --server https://yoru.acme.com
 ```
 
-The browser will open on `https://app.yoru.acme.com/cli/pair?code=…` for
-approval. From there the CLI writes `~/.config/yoru/config.json` with
-your server URL and a paired token. Everything else — Claude Code hooks,
-event ingest, dashboard polling — works identically to Cloud.
+The browser opens your dashboard's pairing page for approval. From there the CLI
+writes `~/.config/yoru/config.json` with your server URL and a paired token.
+Everything else — Claude Code hooks, event ingest, dashboard polling — works
+against your instance.
 
-If you run an air-gapped environment where PyPI isn't reachable, mirror
-the wheel from `pip download yoru-cli` into your internal PyPI index and
-install from there.
+If you run an air-gapped environment where PyPI isn't reachable, mirror the
+wheel from `pip download yoru-cli` into your internal index and install from
+there (still passing `--server`).
 
 ---
 
-## 6. Verification checklist
+## Verification checklist
 
 Run through these after the first deploy; they confirm the full stack:
 
-- [ ] `curl https://api.yoru.acme.com/health` returns `200`
-- [ ] Sign up a first account on `https://app.yoru.acme.com/signup`
-- [ ] DB check: that user has a row in `public.subscriptions` with
-      `plan_name = 'Org'`, `status = 'active'` (the self-host trigger fired)
-- [ ] `GET /api/v1/me/subscription` returns `{ plan_name: "Org", features: { … } }`
-- [ ] "Continue with GitHub" on /signin completes → lands on /welcome
-- [ ] `yoru init --server https://api.yoru.acme.com` pairs cleanly
+- [ ] `curl https://yoru.acme.com/health` returns `200`
+- [ ] The first-run wizard creates your admin account (or `make setup` does)
+- [ ] Sign in to the dashboard with that admin account
+- [ ] `yoru init --server https://yoru.acme.com` pairs cleanly
 - [ ] Run `claude` in any git repo → a tool call appears in the dashboard
       within ~5 s
 - [ ] Drop a known-secret pattern in a Bash tool call (e.g.
       `echo AKIAIOSFODNN7EXAMPLE`) → the session shows a `[secret]` red flag
-- [ ] `/settings/billing` shows "Org" and hides the Upgrade buttons
-      (because `STRIPE_API_KEY` is empty)
-- [ ] Welcome email lands in the new user's inbox (if SMTP is configured)
+- [ ] No "Upgrade" buttons appear (billing is off for self-host)
+- [ ] (If SMTP configured) a welcome / invite email lands in the inbox
 
 All green → you're live.
 
@@ -314,11 +304,10 @@ All green → you're live.
 
 ## Upgrading
 
-Yoru ships continuously on Cloud. Self-host tracks behind by choice — pin
-a Docker tag (`yoru-backend:v0.5.0`) and upgrade on your cadence.
+Pin a Docker tag and upgrade on your own cadence:
 
 ```bash
-# Pull the new image, restart, let init_db() auto-apply SQLite migrations
+# Pull the new image, restart, let the app auto-apply schema migrations on boot
 docker pull ghcr.io/helios-code/yoru-backend:latest
 docker stop yoru-backend && docker rm yoru-backend
 docker run -d --name yoru-backend --env-file .env -p 8002:8002 \
@@ -326,27 +315,29 @@ docker run -d --name yoru-backend --env-file .env -p 8002:8002 \
   ghcr.io/helios-code/yoru-backend:latest
 ```
 
-Schema changes in `public.*` (Supabase) occasionally need a manual
-migration run. Watch the release notes; we tag breaking migrations with a
-🚨 and ship a `supabase db push`-compatible file.
+Schema changes are applied automatically at startup for both SQLite and
+Postgres. Watch the release notes — breaking changes are tagged with a 🚨.
 
 ---
 
 ## Security notes
 
 - **AGPL-3.0**: modifying the backend and exposing it to *other organizations*
-  triggers the AGPL's distribution clause — you must offer source to
-  those users. Internal single-org use is unrestricted. (The CLI is MIT
-  and carries no such obligation.)
-- **Secrets hygiene**: `AUTH_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, and
-  `SMTP_PASSWORD` never need to reach any client. Pin them to the backend
+  triggers the AGPL's distribution clause — you must offer source to those
+  users. Internal single-org use is unrestricted. (The CLI is MIT and carries
+  no such obligation.)
+- **`SETUP_TOKEN`**: any internet-exposed instance should set this before first
+  boot so a stranger can't reach the open first-run wizard and claim the admin
+  account.
+- **`AUTH_JWT_SECRET`**: pin it explicitly in production. If unset it
+  auto-generates to `backend/data/.auth_jwt_secret` — fine for a single box,
+  but set it yourself when running multiple replicas so tokens stay valid
+  across them.
+- **Secrets hygiene**: `AUTH_JWT_SECRET`, `SUPABASE_JWT_SECRET`, and
+  `SMTP_PASSWORD` never need to reach any client. Keep them on the backend
   process only.
-- **Cookie domain**: the `COOKIE_DOMAIN` env is what lets the dashboard at
-  `app.yoru.acme.com` read the CSRF cookie set by `api.yoru.acme.com`.
-  If you use a single subdomain for both (same origin), leave it unset.
-- **RLS**: every `public.*` table has RLS policies. The backend mediates
-  all writes, but a leaked anon key will still only expose what a user's
-  own row grants.
+- **Supabase RLS** (only if `AUTH_PROVIDER=supabase`): the backend mediates all
+  writes; a leaked anon key still only exposes what a user's own row grants.
 
 ---
 
@@ -354,9 +345,8 @@ migration run. Watch the release notes; we tag breaking migrations with a
 
 Open an issue on `github.com/yoru-sh/yoru` for:
 
-- A migration that fails on your Supabase (we'll ship a fix)
-- A feature you want gated behind a plan that isn't (we'll land an override)
-- Bare-metal self-host help (Postgres + GoTrue instead of Supabase) —
-  Phase G, but real customers unblock it
+- A migration that fails on your database (we'll ship a fix)
+- A feature you expected to be available that isn't
+- Anything in this guide that didn't match what you saw
 
-Or email `hello@yoru.sh` for private / enterprise conversations.
+Or email `hello@yoru.sh` for general contact.

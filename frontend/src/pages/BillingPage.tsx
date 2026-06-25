@@ -502,14 +502,6 @@ export function BillingPage() {
         <p className="font-mono text-micro text-ink-faint">
           Secured by Stripe · cancel anytime · seats pro-rated
         </p>
-        <a
-          href={`${(import.meta.env.VITE_MARKETING_URL as string | undefined) ?? "https://yoru.sh"}/pricing`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-mono text-caption text-ink-muted underline decoration-rule underline-offset-2 hover:text-ink"
-        >
-          Compare all features →
-        </a>
       </div>
     </div>
   )
@@ -608,7 +600,7 @@ function PlanCard({
           return (
             <div className="mt-4">
               <a
-                href="https://yoru.sh/contact-sales?from=dashboard"
+                href="https://github.com/yoru-sh/yoru"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex min-h-[40px] w-full items-center justify-center gap-2 rounded-sm border border-ink bg-ink px-3 py-2 font-mono text-caption font-semibold uppercase tracking-wider text-canvas hover:bg-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
@@ -629,7 +621,7 @@ function PlanCard({
           return (
             <div className="mt-4">
               <a
-                href={`https://yoru.sh/contact-sales?from=dashboard`}
+                href="https://github.com/yoru-sh/yoru"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex min-h-[40px] w-full items-center justify-center gap-2 rounded-sm border border-rule bg-surface px-3 py-2 font-mono text-caption uppercase tracking-wider text-ink hover:bg-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
