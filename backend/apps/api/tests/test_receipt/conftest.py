@@ -21,6 +21,11 @@ from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
 from apps.api.api.routers.receipt import db as receipt_db  # noqa: E402
 from apps.api.api.routers.receipt import models  # noqa: F401,E402
 
+# Register the datastore model (table `datastore_records`) in SQLModel.metadata
+# BEFORE create_all, else workspace-routing / share queries hit a missing table
+# in tests ("no such table: datastore_records").
+from libs.datastore import local_store  # noqa: F401,E402
+
 
 @pytest.fixture()
 def engine():
@@ -36,10 +41,18 @@ def engine():
     SQLModel.metadata.create_all(eng)
     old = receipt_db.engine
     receipt_db.engine = eng
+    # local_store did `from ...db import engine` at import time, so it holds a
+    # snapshot — rebinding receipt_db.engine alone doesn't reach it. Patch its
+    # name too, else datastore-backed paths (workspace routing, share) query a
+    # table-less engine ("no such table: datastore_records").
+    from libs.datastore import local_store
+    old_ls = local_store.engine
+    local_store.engine = eng
     try:
         yield eng
     finally:
         receipt_db.engine = old
+        local_store.engine = old_ls
 
 
 @pytest.fixture()
