@@ -22,10 +22,12 @@ router knowing about the other. See main.py for mount order.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlmodel import Session as SQLSession, select
+from sqlmodel import Session as SQLSession
+from sqlmodel import select
 
 from apps.api.api.core.ratelimit import limiter
 
@@ -35,10 +37,56 @@ from .models import (
     PublicEventOut,
     PublicSessionOut,
     ScoreBreakdown,
+)
+from .models import (
     Session as SessionRow,
 )
+from .red_flags import _SECRET_PATTERNS
 from .scoring import compute_score
 from .sessions_router import _enrich_events, _summarize_files_changed
+
+# ── TSU-44 redaction-pass — defense-in-depth content scrubber ────────────────
+# The flag-based strip in _redact_event nulls events the ingest scanner flagged
+# secret_*. This scrubber additionally masks credentials/paths/repo identity
+# that slipped through UNFLAGGED, applied to every public-facing string (event
+# content/output/tool_input/path + session title/summary + file paths) before
+# a session is served at /s/:id. Private-by-default + opt-in share gate WHEN a
+# session goes public; this gates WHAT leaves with it.
+
+# Absolute home paths leak the OS username + home layout -> mask the prefix.
+_POSIX_HOME_RE = re.compile(r"(?:/Users|/home|/root)/[^/\s\"']+")
+_WIN_HOME_RE = re.compile(r"[A-Za-z]:\\Users\\[^\\\s\"']+")
+# Git remote URLs carry owner/repo identity. Known hosts only (conservative).
+_GIT_REMOTE_RE = re.compile(
+    r"(?:git@|(?:https?|ssh)://(?:[^@/\s]+@)?)"
+    r"(?:github\.com|gitlab\.com|bitbucket\.org|ssh\.dev\.azure\.com|dev\.azure\.com)"
+    r"[:/][\w.-]+/[\w.-]+?(?:\.git)?(?=[\s\"')\]]|$)"
+)
+
+
+def _scrub_public_text(text):
+    """Mask secrets/tokens, absolute home paths and git-remote URLs in a
+    public-facing string. Returns the input unchanged when falsy or non-str."""
+    if not isinstance(text, str) or not text:
+        return text
+    s = text
+    for kind, rx in _SECRET_PATTERNS.items():
+        s = rx.sub(f"[redacted:{kind.removeprefix('secret_')}]", s)
+    s = _POSIX_HOME_RE.sub("~", s)
+    s = _WIN_HOME_RE.sub("~", s)
+    s = _GIT_REMOTE_RE.sub("[redacted:repo]", s)
+    return s
+
+
+def _scrub_value(obj):
+    """Recursively scrub strings inside a JSON-ish value (e.g. tool_input)."""
+    if isinstance(obj, str):
+        return _scrub_public_text(obj)
+    if isinstance(obj, dict):
+        return {k: _scrub_value(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_value(v) for v in obj]
+    return obj
 
 
 def _is_secret_flag(flag: str) -> bool:
@@ -59,6 +107,16 @@ def _redact_event(ev_out, *, flags: list[str]) -> PublicEventOut:
         base["content"] = None
         base["output"] = None
         base["tool_input"] = None
+    else:
+        # Defense-in-depth: scrub credentials/paths/repo-names that weren't
+        # flagged on this (visible) event before it goes public.
+        base["content"] = _scrub_public_text(base.get("content"))
+        base["output"] = _scrub_public_text(base.get("output"))
+        base["tool_input"] = _scrub_value(base.get("tool_input"))
+    # path + group_key (group_key = f"{tool}:{path or content[:40]}") carry
+    # absolute paths / leading content on either branch — scrub both always.
+    base["path"] = _scrub_public_text(base.get("path"))
+    base["group_key"] = _scrub_public_text(base.get("group_key"))
     # PublicEventOut is a strict subset of EventOut — model_validate drops
     # anything not in its schema (e.g. tokens_input/output/cost_usd that
     # we deliberately omit from the public event shape).
@@ -130,6 +188,10 @@ class PublicSessionsRouter:
             _redact_event(e, flags=list(e.flags or [])) for e in events_out
         ]
         files_out = _summarize_files_changed(events_asc)
+        # Scrub absolute home paths out of the public file list.
+        for _f in files_out:
+            if getattr(_f, "path", None):
+                _f.path = _scrub_public_text(_f.path)
 
         tool_call_count = sum(
             1 for e in events_asc if e.kind in ("tool_use", "file_change")
@@ -162,10 +224,10 @@ class PublicSessionsRouter:
             cost_usd=row.cost_usd,
             flagged=row.flagged,
             flags=list(row.flags or []),
-            title=row.title,
+            title=_scrub_public_text(row.title),
             files_changed=files_out,
             tools_called=list(row.tools_called or []),
-            summary=row.summary,
+            summary=_scrub_public_text(row.summary),
             events=events_public,
             score=score_out,
         )

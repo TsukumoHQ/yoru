@@ -271,3 +271,60 @@ def test_public_get_keeps_non_secret_flags_verbatim(client, db_session):
     bash = body["events"][0]
     assert bash["flags"] == ["shell_rm"]
     assert bash["content"] == "rm -rf node_modules"  # NOT redacted
+
+
+# ---------- TSU-44 redaction-pass: scrub UNFLAGGED secrets/paths/repos ----------
+
+def test_public_scrubs_unflagged_secrets_paths_and_repos(client, db_session):
+    """The flag-based strip only nulls events the scanner flagged secret_*.
+    The redaction-pass must additionally mask credentials, absolute home
+    paths, and git-remote URLs that slipped through UNFLAGGED — in event
+    content/path/tool_input AND the session title/summary/file list."""
+    db_session.add(
+        SessionRow(
+            id="redact1",
+            user="bob",
+            started_at=BASE_TS,
+            cost_usd=0.10,
+            flagged=False,
+            flags=[],
+            is_public=True,
+            title="fix /Users/bob/secret-proj/app.py leaking AKIAIOSFODNN7EXAMPLE",
+            summary="cloned git@github.com:acme/private-repo.git into /home/bob/work",
+        )
+    )
+    db_session.add(
+        Event(
+            session_id="redact1",
+            ts=BASE_TS + timedelta(seconds=1),
+            kind="file_change",
+            tool="Edit",
+            path="/Users/bob/secret-proj/.env.local",
+            content="STRIPE=sk_test_abcdefghijklmnopqrstuvwx0123",
+            flags=[],  # NOT flagged — the gap the scrubber closes
+            raw={
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "/Users/bob/secret-proj/.env.local",
+                    "repo": "https://github.com/acme/secret-thing",
+                },
+            },
+        )
+    )
+    db_session.commit()
+
+    body = client.get("/api/v1/public/sessions/redact1").json()
+    blob = __import__("json").dumps(body)
+
+    # No raw secret / absolute home path / repo identity anywhere in the wire.
+    assert "AKIAIOSFODNN7EXAMPLE" not in blob
+    assert "sk_test_abcdefghijklmnopqrstuvwx0123" not in blob
+    assert "/Users/bob" not in blob
+    assert "/home/bob" not in blob
+    assert "acme/private-repo" not in blob
+    assert "acme/secret-thing" not in blob
+    # Masks present (proves the scrubber ran, not that the field was dropped).
+    assert "[redacted:" in blob or "~" in blob
+    ev = body["events"][0]
+    assert ev["content"] == "STRIPE=[redacted:stripe]"
+    assert ev["path"] == "~/secret-proj/.env.local"
