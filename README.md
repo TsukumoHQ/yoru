@@ -215,6 +215,21 @@ dashboard → red-flags → score → share/replay — runs end to end on SQLite
 auth with zero external services. Billing is gated off by default. See
 [releases](https://github.com/TsukumoHQ/yoru/releases).
 
+## Part of the suite
+
+yoru is the **observability** layer of a four-part open-source suite for running AI coding agents in production, built by [tsukumo](https://tsukumo.ch):
+
+- **yoru** — observability: session receipts of what each agent actually did (this repo).
+- **[trovex](https://trovex.dev)** — context: serve agents the one canonical doc per query instead of rereading the repo.
+- **[wrai.th](https://github.com/TsukumoHQ/WRAI.TH)** — orchestration: run and coordinate a fleet of agents.
+- **[dokan](https://github.com/TsukumoHQ/dokan)** — deterministic execution: run the agent's settled, repeatable work as scripts in clean containers, no model in the loop.
+
+Built and run in production by [tsukumo](https://tsukumo.ch), a developer studio and AI consultancy.
+
+## Working with a team?
+
+yoru is free to self-host. If your team is rolling out coding agents at scale and wants hands-on help running them well, that is what the consulting is for. [Reach out](https://tsukumo.ch/consulting/?utm_source=yoru&utm_medium=oss-suite&utm_campaign=consulting&utm_content=readme): tsukumo, the team behind yoru.
+
 ## License
 
 AGPL-3.0 · [LICENSE](./LICENSE). Modifying the server and exposing it to other users triggers the source-distribution clause — fine for internal company self-hosting, talk to us first before running a competing hosted service on top of this code.
