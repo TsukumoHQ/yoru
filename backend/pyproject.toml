@@ -17,7 +17,7 @@ dependencies = [
     "email-validator==2.1.0",
     "aiosmtplib>=2.0.0",
     "Jinja2>=3.1.0",
-    "httpx>=0.24.0",
+    "httpx>=0.24.0,<0.28",
     "tenacity==8.2.3",
     # OpenTelemetry
     "opentelemetry-api==1.21.0",
