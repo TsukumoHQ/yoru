@@ -15,6 +15,11 @@ rules:
 
 Using Supabase as the source of truth means a teammate who just joined
 your org shows up immediately — they don't need to run a session first.
+
+Self-host: there is no Supabase, so the membership lookups return nothing and
+`caller_email` falls back to the email in the verified JWT. The caller then
+sees their own sessions (workspace_ids = []). A local instance with no org is
+the normal case, and this is what makes the dashboard non-empty there.
 """
 from __future__ import annotations
 
@@ -24,16 +29,22 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
-from sqlmodel import Session as SQLSession, select
+from sqlmodel import Session as SQLSession
+from sqlmodel import select
 
-from apps.api.api.dependencies.auth import get_current_user_id
-from libs.log_manager.controller import LoggingController
-from libs.supabase.supabase import SupabaseManager
+from apps.api.api.dependencies.auth import (
+    get_current_user_id,
+    get_current_user_token,
+)
+from apps.api.api.services.auth.provider import get_auth_provider
 from libs.datastore import get_data_store
+from libs.log_manager.controller import LoggingController
 
 from .db import get_session
 from .models import (
     Session as SessionRow,
+)
+from .models import (
     TeamDashboardOut,
     TeamDashboardTotals,
     TeamDashboardUser,
@@ -48,6 +59,20 @@ def _naive_utc(d: datetime) -> datetime:
 
 def _default_since() -> datetime:
     return _naive_utc(datetime.now(timezone.utc) - timedelta(days=7))
+
+
+def _caller_email_from_token(token: str) -> Optional[str]:
+    """Caller's email straight from the verified JWT claim.
+
+    Self-host fallback: `_resolve_scope` reads the email from the Supabase
+    `profiles` table, which is empty on a local store, so it returns None and
+    the dashboard would scope to nothing. The email is already in the access
+    token both providers issue — read it directly. Works identically on cloud.
+    """
+    try:
+        return get_auth_provider().email_from_token(token)
+    except Exception:
+        return None
 
 
 def _resolve_scope(user_id: UUID) -> tuple[list[str], Optional[str]]:
@@ -147,14 +172,20 @@ class DashboardRouter:
         since: Optional[datetime] = Query(default=None),
         db: SQLSession = Depends(get_session),
         user_id: UUID = Depends(get_current_user_id),
+        token: str = Depends(get_current_user_token),
     ) -> TeamDashboardOut:
         since_dt = _naive_utc(since) if since is not None else _default_since()
 
-        workspace_ids, caller_email = _resolve_scope(user_id)
+        workspace_ids, profile_email = _resolve_scope(user_id)
+        # Prefer the email from the verified JWT — it's always present and makes
+        # the dashboard work on self-host, where _resolve_scope's Supabase
+        # `profiles` lookup returns nothing. On cloud both agree.
+        caller_email = profile_email or _caller_email_from_token(token)
 
         # Always include the caller themselves by email so legacy rows with
         # workspace_id = NULL still show up for their owner, and so a brand-new
-        # user with zero org memberships still sees their own activity.
+        # user with zero org memberships (the normal self-host case) still sees
+        # their own activity.
         scope_filter = SessionRow.user == caller_email
         if workspace_ids:
             scope_filter = scope_filter | SessionRow.workspace_id.in_(workspace_ids)

@@ -73,6 +73,35 @@ def test_empty_db_returns_zeros(client: TestClient) -> None:
     }
 
 
+def test_self_host_scope_falls_back_to_jwt_email(
+    client: TestClient, db_session: SQLSession, monkeypatch
+) -> None:
+    """Self-host: with no Supabase, _resolve_scope returns ([], None). The
+    caller must still see THEIR OWN sessions, scoped by the email in the verified
+    JWT — not an empty caller_email that matches nothing. (TSU-63 fix #1.)"""
+    import apps.api.api.routers.receipt.dashboard_router as dr
+
+    monkeypatch.setattr(dr, "_resolve_scope", lambda _uid: ([], None))
+    now = _now()
+    _seed(
+        db_session,
+        SessionRow(
+            id="mine", user=_CALLER_EMAIL, started_at=now,
+            cost_usd=1.0, flagged=True,
+        ),
+        SessionRow(
+            id="other", user="someone-else@x.io", started_at=now,
+            cost_usd=2.0, flagged=False,
+        ),
+    )
+    resp = client.get("/api/v1/dashboard/team")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert {u["email"] for u in body["users"]} == {_CALLER_EMAIL}
+    assert body["totals"]["sessions"] == 1
+    assert body["totals"]["flagged"] == 1
+
+
 def test_populated_db_returns_groupings(
     client: TestClient, db_session: SQLSession
 ) -> None:
