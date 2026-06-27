@@ -1,5 +1,5 @@
 """
-Redis library for Synergix AI.
+Redis library for Yoru.
 
 This module provides:
 - RedisManager: Low-level Redis operations (queues, key-value operations) - ASYNC

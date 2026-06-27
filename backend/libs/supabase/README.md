@@ -17,7 +17,7 @@ This is our **main database connection hub** - the bridge between our applicatio
 
 ### For the System:
 - **Data Persistence** - Stores all business data permanently and securely
-- **Client Management** - Manages client information following Synergix ID rules
+- **Client Management** - Manages client information following Yoru ID rules
 - **Transaction Handling** - Ensures data consistency and integrity
 - **Performance Optimization** - Connection pooling and query optimization
 - **Security** - Row-level security and proper authentication
@@ -61,7 +61,7 @@ result = db.insert("clients", client_data)
 print(f"Created client with ID: {result['client_id']}")
 ```
 
-### Client Management (Following Synergix Rules)
+### Client Management (Following Yoru Rules)
 ```python
 # Get client by shortname (most common lookup)
 client = db.get_client_by_shortname("ATONRA")
@@ -261,7 +261,7 @@ db = SupabaseClient(
 
 ## 🔍 Query Examples
 
-### Client Operations Following Synergix Rules
+### Client Operations Following Yoru Rules
 ```python
 # Get all client integration IDs
 def get_client_integrations(client_shortname):

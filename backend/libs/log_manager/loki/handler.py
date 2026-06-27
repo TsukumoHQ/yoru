@@ -33,7 +33,7 @@ class LokiHandler(logging.Handler):
         else:
             # When running locally, use localhost instead of 'loki'
             default_url = os.getenv(
-                "LOKI_URL", "http://synergix_loki:3100/loki/api/v1/push"
+                "LOKI_URL", "http://yoru_loki:3100/loki/api/v1/push"
             )
             if not in_container and "loki:" in default_url:
                 # Replace 'loki' with 'localhost' for non-container environments
@@ -41,7 +41,7 @@ class LokiHandler(logging.Handler):
             self.loki_url = default_url
 
         self.hostname = hostname or socket.gethostname()
-        self.app_name = app_name or "synergix"
+        self.app_name = app_name or "yoru"
         self.buffer = []
         self.buffer_size = buffer_size
         self.max_retry = max_retry

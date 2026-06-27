@@ -57,7 +57,7 @@ class LoggingController:
             # If we can't create in current directory, try user's home directory
             home_dir = os.path.expanduser("~")
             service_log_dir = os.path.join(
-                home_dir, ".synergix", "logs", service_category
+                home_dir, ".yoru", "logs", service_category
             )
             os.makedirs(service_log_dir, mode=0o755, exist_ok=True)
 
