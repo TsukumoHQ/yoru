@@ -22,7 +22,7 @@ when you want them.
 The fastest way to a running instance — no accounts, no provisioning:
 
 ```bash
-git clone https://github.com/yoru-sh/yoru.git && cd yoru
+git clone https://github.com/TsukumoHQ/yoru.git && cd yoru
 cp backend/.env.example backend/.env    # defaults work as-is
 make dev                                # api :8002 + dashboard :5173
 ```
@@ -343,7 +343,7 @@ Postgres. Watch the release notes — breaking changes are tagged with a 🚨.
 
 ## When to reach out
 
-Open an issue on `github.com/yoru-sh/yoru` for:
+Open an issue on `github.com/TsukumoHQ/yoru` for:
 
 - A migration that fails on your database (we'll ship a fix)
 - A feature you expected to be available that isn't

@@ -600,7 +600,7 @@ function PlanCard({
           return (
             <div className="mt-4">
               <a
-                href="https://github.com/yoru-sh/yoru"
+                href="https://github.com/TsukumoHQ/yoru"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex min-h-[40px] w-full items-center justify-center gap-2 rounded-sm border border-ink bg-ink px-3 py-2 font-mono text-caption font-semibold uppercase tracking-wider text-canvas hover:bg-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
@@ -621,7 +621,7 @@ function PlanCard({
           return (
             <div className="mt-4">
               <a
-                href="https://github.com/yoru-sh/yoru"
+                href="https://github.com/TsukumoHQ/yoru"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex min-h-[40px] w-full items-center justify-center gap-2 rounded-sm border border-rule bg-surface px-3 py-2 font-mono text-caption uppercase tracking-wider text-ink hover:bg-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
