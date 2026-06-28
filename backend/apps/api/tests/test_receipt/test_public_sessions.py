@@ -328,3 +328,32 @@ def test_public_scrubs_unflagged_secrets_paths_and_repos(client, db_session):
     ev = body["events"][0]
     assert ev["content"] == "STRIPE=[redacted:stripe]"
     assert ev["path"] == "~/secret-proj/.env.local"
+
+
+# ---------- TSU-167 render/read caching ----------
+
+def test_public_get_sets_cache_headers(client, db_session):
+    _seed_session(db_session, sid="s1", user="alice", is_public=True)
+    resp = client.get("/api/v1/public/sessions/s1")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers.get("ETag")
+    cc = resp.headers.get("Cache-Control", "")
+    assert "public" in cc and "s-maxage" in cc
+
+
+def test_public_get_returns_304_on_matching_etag(client, db_session):
+    _seed_session(db_session, sid="s1", user="alice", is_public=True)
+    first = client.get("/api/v1/public/sessions/s1")
+    etag = first.headers["ETag"]
+    again = client.get(
+        "/api/v1/public/sessions/s1", headers={"If-None-Match": etag}
+    )
+    assert again.status_code == 304, again.text
+    assert again.headers.get("ETag") == etag
+
+
+def test_public_404_is_not_cached(client, db_session):
+    _seed_session(db_session, sid="s1", user="alice", is_public=False)
+    resp = client.get("/api/v1/public/sessions/s1")
+    assert resp.status_code == 404
+    assert resp.headers.get("Cache-Control") == "no-store"

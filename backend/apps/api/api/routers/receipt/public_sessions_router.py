@@ -22,10 +22,11 @@ router knowing about the other. See main.py for mount order.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import Session as SQLSession
 from sqlmodel import select
 
@@ -44,6 +45,43 @@ from .models import (
 from .red_flags import _SECRET_PATTERNS
 from .scoring import compute_score
 from .sessions_router import _enrich_events, _summarize_files_changed
+
+# ── TSU-167 render/read caching ──────────────────────────────────────────────
+# A shared session is effectively immutable once the run ends, so the public
+# read is safe to cache + content-address. The ETag is derived from the stable
+# row fields; a CDN/proxy serves a viral spike from cache and clients revalidate
+# cheaply (304) instead of re-running the redaction + scoring per hit. Bump
+# _PUBLIC_VIEW_VERSION whenever the public payload SHAPE changes so stale caches
+# don't serve an old schema. s-maxage is kept short (60s) so a `yoru share`
+# REVOKE takes effect quickly — the public read must not outlive un-sharing.
+_PUBLIC_VIEW_VERSION = "1"
+_PUBLIC_CACHE_CONTROL = "public, s-maxage=60, stale-while-revalidate=300"
+
+
+def _public_etag(row: SessionRow) -> str:
+    """Weak ETag over the stable, public-visible fields of a shared session."""
+    basis = "|".join(
+        str(x)
+        for x in (
+            _PUBLIC_VIEW_VERSION,
+            row.id,
+            row.ended_at,
+            row.tools_count,
+            row.files_count,
+            row.tokens_input,
+            row.tokens_output,
+            row.flagged,
+            tuple(row.flags or []),
+        )
+    )
+    return 'W/"' + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:20] + '"'
+
+
+def _if_none_match(header: str | None, etag: str) -> bool:
+    """True when the client's If-None-Match covers our ETag (→ 304)."""
+    if not header:
+        return False
+    return etag in header or header.strip() == "*"
 
 # ── TSU-44 redaction-pass — defense-in-depth content scrubber ────────────────
 # The flag-based strip in _redact_event nulls events the ingest scanner flagged
@@ -149,6 +187,7 @@ class PublicSessionsRouter:
         self,
         session_id: str,
         request: Request,  # required by slowapi's limit decorator
+        response: Response,
         db: SQLSession = Depends(get_session),
     ) -> PublicSessionOut:
         """Return the stripped-down public view of a shared session.
@@ -160,7 +199,23 @@ class PublicSessionsRouter:
             select(SessionRow).where(SessionRow.id == session_id)
         ).first()
         if row is None or not row.is_public:
-            raise HTTPException(status_code=404, detail="session not found")
+            # Never cache the 404 — a freshly-revoked or never-shared id must
+            # not be served from a CDN, and private ids must stay unguessable.
+            raise HTTPException(
+                status_code=404,
+                detail="session not found",
+                headers={"Cache-Control": "no-store"},
+            )
+
+        # TSU-167: content-address the public read. Compute the ETag from the
+        # stable row BEFORE the expensive event/redaction/scoring work, so a
+        # revalidating client (If-None-Match) gets a 304 that skips it entirely.
+        etag = _public_etag(row)
+        if _if_none_match(request.headers.get("if-none-match"), etag):
+            return Response(
+                status_code=304,
+                headers={"ETag": etag, "Cache-Control": _PUBLIC_CACHE_CONTROL},
+            )
 
         # Same event window as authed detail: last 1000 + any flagged rows
         # outside that window. Flagged events carry the narrative; silent
@@ -206,6 +261,10 @@ class PublicSessionsRouter:
             flags=row.flags,
         )
         score_out = ScoreBreakdown(**asdict(score))
+
+        # Cache the full payload at the edge + enable client revalidation.
+        response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = _PUBLIC_CACHE_CONTROL
 
         # Explicit field-by-field construction — enumerating every public
         # field here means a future addition to SessionRow doesn't
