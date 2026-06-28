@@ -13,7 +13,7 @@ dependencies = [
     # v2 decorator already).
     "pydantic>=2.10.3,<3",
     "pydantic-settings>=2.6.0,<3",
-    "python-dotenv==1.0.0",
+    "python-dotenv>=1.2.2,<2",  # CVE-2026-28684 fixed in 1.2.2 (was hard-pinned 1.0.0)
     "email-validator==2.1.0",
     "aiosmtplib>=2.0.0",
     "Jinja2>=3.1.0",
@@ -28,7 +28,7 @@ dependencies = [
     "opentelemetry-exporter-jaeger==1.21.0",
     "opentelemetry-exporter-otlp==1.21.0",
     # --- API service ---
-    "fastapi==0.109.0",
+    "fastapi==0.109.1",  # PYSEC-2024-38 (python-multipart) fixed in 0.109.1; starlette CVEs need a 0.11x major (flagged)
     "uvicorn[standard]==0.27.0",
     "supabase>=2.9.1,<3",
     "redis[hiredis]==5.0.1",
@@ -41,7 +41,7 @@ dependencies = [
     "stripe>=15.0.1",
     "psycopg[binary]>=3.1",
     # --- TSU-54 shareable receipt PNG (server-side render, self-hosted) ---
-    "Pillow>=10.2,<12",
+    "Pillow>=12.1.1,<13",  # CVE-2026-25990/40192/42309-42311 + PYSEC-2026-165 fixed in 12.x
 ]
 
 [project.optional-dependencies]
