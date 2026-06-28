@@ -1,22 +1,25 @@
-"""Unit tests for POST /api/v1/billing/webhook (US-16, Wave-20-C C2).
+"""Unit tests for POST /api/v1/billing/webhook (Stripe).
 
-Covers HMAC verification, idempotency on replay, signature rejection, missing
-header rejection, and unknown-event-type no-op. Bonus: 503 when secret unset.
+The Stripe signature verify (`stripe.Webhook.construct_event`) and the Supabase
+RPC (`_call_supabase_rpc`) are both stubbed — these tests assert the handler's
+event routing, idempotency ledger, and RPC dispatch, not Stripe/Supabase wire
+behavior. In-memory SQLite + StaticPool; `webhook.engine` is monkeypatched
+because the handler opens its own `DBSession(engine)` (no Depends injection).
 
-Harness mirrors test_billing_checkout.py: in-memory SQLite + StaticPool, plus
-a monkeypatch of `webhook.engine` because the webhook handler opens its own
-`DBSession(engine)` (no Depends(get_session) injection).
+Note on current contract: the webhook no longer mutates a local `Org` table —
+subscription state is delegated to the Supabase `set/cancel_*` RPCs, and the
+local DB keeps only an idempotency ledger (`billing_events`).
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import os
 import uuid
-from typing import Iterator
+from collections.abc import Iterator
+from types import SimpleNamespace
 
 import pytest
+import stripe
 
 os.environ.setdefault("RECEIPT_DB_URL", "sqlite:///:memory:")
 
@@ -26,16 +29,13 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 from sqlmodel import Session, SQLModel, create_engine, select  # noqa: E402
 
 from apps.api.api.routers.billing import webhook as webhook_module  # noqa: E402
-from apps.api.api.routers.billing.models import BillingEvent, Org  # noqa: E402
+from apps.api.api.routers.billing.models import BillingEvent  # noqa: E402
 from apps.api.api.routers.billing.webhook import WebhookRouter  # noqa: E402
 from apps.api.api.routers.receipt import db as receipt_db  # noqa: E402
 from apps.api.api.routers.receipt import models  # noqa: F401,E402
 
-_SECRET = "testsecret"
-
-
-def _sign(body: bytes, secret: str = _SECRET) -> str:
-    return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+_SECRET = "whsec_test"
+_SIG = {"Stripe-Signature": "t=1,v1=deadbeef", "Content-Type": "application/json"}
 
 
 @pytest.fixture()
@@ -68,7 +68,44 @@ def app(engine) -> FastAPI:
 
 @pytest.fixture()
 def secret_env(monkeypatch):
-    monkeypatch.setenv("POLAR_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", _SECRET)
+
+
+@pytest.fixture()
+def rpc_spy(monkeypatch):
+    """Stub the Supabase RPC so no network is hit; record (fn, args) calls."""
+    calls: list[tuple[str, dict]] = []
+
+    def _spy(fn, args):
+        calls.append((fn, args))
+
+    monkeypatch.setattr(webhook_module, "_call_supabase_rpc", _spy)
+    return calls
+
+
+def _stub_event(monkeypatch, *, raise_sig: bool = False) -> None:
+    """Stub stripe.Webhook.construct_event: parse the raw JSON body into a
+    stripe.Event-like object (bypassing real signature verification). With
+    raise_sig=True it raises SignatureVerificationError (bad/missing sig)."""
+
+    def _construct(payload, sig_header, secret):
+        if raise_sig:
+            raise stripe.error.SignatureVerificationError("bad sig", sig_header)
+        data = json.loads(payload)
+        obj = (data.get("data") or {}).get("object") or {}
+        return SimpleNamespace(
+            id=data.get("id", ""),
+            type=data.get("type", ""),
+            data=SimpleNamespace(object=obj),
+        )
+
+    monkeypatch.setattr(stripe.Webhook, "construct_event", _construct)
+
+
+def _evt(event_id: str, event_type: str, obj: dict) -> bytes:
+    return json.dumps(
+        {"id": event_id, "type": event_type, "data": {"object": obj}}
+    ).encode("utf-8")
 
 
 async def _post(app: FastAPI, body: bytes, headers: dict[str, str]) -> httpx.Response:
@@ -77,190 +114,194 @@ async def _post(app: FastAPI, body: bytes, headers: dict[str, str]) -> httpx.Res
         return await ac.post("/api/v1/billing/webhook", content=body, headers=headers)
 
 
-async def test_webhook_checkout_completed_flips_plan(
-    app, db_session, secret_env
+async def test_webhook_checkout_completed_syncs_subscription(
+    app, db_session, secret_env, rpc_spy, monkeypatch
 ) -> None:
-    org_id = str(uuid.uuid4())
-    payload = {
-        "id": "evt_1",
-        "type": "checkout.completed",
-        "data": {"client_reference_id": org_id, "plan": "team"},
-    }
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"X-Polar-Signature": _sign(body), "Content-Type": "application/json"}
-
-    resp = await _post(app, body, headers)
-    assert resp.status_code == 200, resp.text
-
-    org = db_session.get(Org, org_id)
-    assert org is not None, "org row missing after checkout.completed"
-    assert org.plan == "team"
-
-    evt = db_session.get(BillingEvent, "evt_1")
-    assert evt is not None, "billing_events row missing"
-    assert evt.event_type == "checkout.completed"
-    assert evt.org_id == org_id
-
-
-async def test_webhook_idempotent_on_replay(app, db_session, secret_env) -> None:
-    org_id = str(uuid.uuid4())
-    payload = {
-        "id": "evt_1",
-        "type": "checkout.completed",
-        "data": {"client_reference_id": org_id, "plan": "team"},
-    }
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"X-Polar-Signature": _sign(body), "Content-Type": "application/json"}
-
-    resp1 = await _post(app, body, headers)
-    assert resp1.status_code == 200, resp1.text
-
-    # Mutate DB to detect a second mutation: flip plan to a sentinel and assert
-    # the replay does NOT re-apply "team" over the sentinel.
-    org = db_session.get(Org, org_id)
-    org.plan = "sentinel_after_first"
-    db_session.add(org)
-    db_session.commit()
-
-    resp2 = await _post(app, body, headers)
-    assert resp2.status_code == 200, resp2.text
-
-    db_session.expire_all()
-    org = db_session.get(Org, org_id)
-    assert org.plan == "sentinel_after_first", (
-        "replay re-applied mutation; idempotency broken"
+    _stub_event(monkeypatch)
+    user_id = str(uuid.uuid4())
+    body = _evt(
+        "evt_1",
+        "checkout.session.completed",
+        {
+            "client_reference_id": user_id,
+            "customer": "cus_1",
+            "metadata": {"plan": "team"},
+        },
     )
 
+    resp = await _post(app, body, _SIG)
+    assert resp.status_code == 200, resp.text
+
+    # Subscription RPC dispatched with the resolved user + plan.
+    assert len(rpc_spy) == 1
+    fn, args = rpc_spy[0]
+    assert fn == "set_user_subscription_from_polar"
+    assert args["p_user_id"] == user_id
+    assert args["p_plan_name"] == "Team"
+    assert args["p_stripe_customer_id"] == "cus_1"
+
+    # Idempotency ledger row written (org_id column carries the user id now).
+    evt = db_session.get(BillingEvent, "evt_1")
+    assert evt is not None, "billing_events row missing"
+    assert evt.event_type == "checkout.session.completed"
+    assert evt.org_id == user_id
+
+
+async def test_webhook_idempotent_on_replay(
+    app, db_session, secret_env, rpc_spy, monkeypatch
+) -> None:
+    _stub_event(monkeypatch)
+    user_id = str(uuid.uuid4())
+    body = _evt(
+        "evt_1",
+        "checkout.session.completed",
+        {"client_reference_id": user_id, "metadata": {"plan": "team"}},
+    )
+
+    assert (await _post(app, body, _SIG)).status_code == 200
+    assert (await _post(app, body, _SIG)).status_code == 200
+
+    # Replay short-circuits on the ledger PK → RPC fired exactly once.
+    assert len(rpc_spy) == 1, "replay re-applied the RPC; idempotency broken"
     rows = db_session.exec(
         select(BillingEvent).where(BillingEvent.event_id == "evt_1")
     ).all()
     assert len(rows) == 1, f"expected 1 BillingEvent for evt_1, got {len(rows)}"
 
 
-async def test_webhook_rejects_bad_signature(app, db_session, secret_env) -> None:
-    org_id = str(uuid.uuid4())
-    payload = {
-        "id": "evt_bad_sig",
-        "type": "checkout.completed",
-        "data": {"client_reference_id": org_id, "plan": "team"},
-    }
-    body = json.dumps(payload).encode("utf-8")
-    headers = {
-        "X-Polar-Signature": _sign(body, "not-the-secret"),
-        "Content-Type": "application/json",
-    }
+async def test_webhook_rejects_bad_signature(
+    app, db_session, secret_env, rpc_spy, monkeypatch
+) -> None:
+    _stub_event(monkeypatch, raise_sig=True)
+    body = _evt(
+        "evt_bad_sig",
+        "checkout.session.completed",
+        {"client_reference_id": str(uuid.uuid4()), "metadata": {"plan": "team"}},
+    )
 
-    resp = await _post(app, body, headers)
+    resp = await _post(
+        app, body, {"Stripe-Signature": "t=1,v1=bad", "Content-Type": "application/json"}
+    )
     assert resp.status_code == 400, resp.text
 
+    assert rpc_spy == []
     assert db_session.get(BillingEvent, "evt_bad_sig") is None
-    assert db_session.get(Org, org_id) is None
 
 
 async def test_webhook_rejects_missing_signature_header(
-    app, db_session, secret_env
+    app, db_session, secret_env, rpc_spy, monkeypatch
 ) -> None:
-    org_id = str(uuid.uuid4())
-    payload = {
-        "id": "evt_no_sig",
-        "type": "checkout.completed",
-        "data": {"client_reference_id": org_id, "plan": "team"},
-    }
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
+    # With a real secret configured, Stripe rejects a missing/blank signature.
+    _stub_event(monkeypatch, raise_sig=True)
+    body = _evt(
+        "evt_no_sig",
+        "checkout.session.completed",
+        {"client_reference_id": str(uuid.uuid4()), "metadata": {"plan": "team"}},
+    )
 
-    resp = await _post(app, body, headers)
+    resp = await _post(app, body, {"Content-Type": "application/json"})
     assert resp.status_code == 400, resp.text
 
+    assert rpc_spy == []
     assert db_session.get(BillingEvent, "evt_no_sig") is None
-    assert db_session.get(Org, org_id) is None
 
 
 async def test_webhook_unknown_event_type_is_noop(
-    app, db_session, secret_env
+    app, db_session, secret_env, rpc_spy, monkeypatch
 ) -> None:
-    payload = {"id": "evt_2", "type": "bogus.event.kind", "data": {}}
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"X-Polar-Signature": _sign(body), "Content-Type": "application/json"}
+    _stub_event(monkeypatch)
+    body = _evt("evt_2", "bogus.event.kind", {})
 
-    resp = await _post(app, body, headers)
+    resp = await _post(app, body, _SIG)
     assert resp.status_code == 200, resp.text
 
+    assert rpc_spy == []
     assert db_session.get(BillingEvent, "evt_2") is None
-    org_count = len(db_session.exec(select(Org)).all())
-    assert org_count == 0, f"unknown event type mutated org table (got {org_count} rows)"
 
 
-async def test_subscription_created_upgrades_existing_org(
-    app, db_session, secret_env
+async def test_subscription_created_syncs_plan(
+    app, db_session, secret_env, rpc_spy, monkeypatch
 ) -> None:
-    db_session.add(Org(id="org-1", plan="free"))
-    db_session.commit()
-
-    payload = {
-        "id": "evt_sub_created_1",
-        "type": "subscription.created",
-        "data": {"client_reference_id": "org-1", "plan": "team"},
+    _stub_event(monkeypatch)
+    user_id = str(uuid.uuid4())
+    obj = {
+        "metadata": {"user_id": user_id},
+        "customer": "cus_9",
+        "status": "active",
+        # plan is read from the live subscription item's price.nickname.
+        "items": {"data": [{"price": {"nickname": "team"}}]},
     }
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"X-Polar-Signature": _sign(body), "Content-Type": "application/json"}
+    body = _evt("evt_sub_created_1", "customer.subscription.created", obj)
 
-    resp = await _post(app, body, headers)
+    resp = await _post(app, body, _SIG)
     assert resp.status_code == 200, resp.text
 
-    db_session.expire_all()
-    org = db_session.get(Org, "org-1")
-    assert org is not None
-    assert org.plan == "team"
+    assert len(rpc_spy) == 1
+    fn, args = rpc_spy[0]
+    assert fn == "set_user_subscription_from_polar"
+    assert args["p_user_id"] == user_id
+    assert args["p_plan_name"] == "Team"
+    assert args["p_status"] == "active"
 
     evt = db_session.get(BillingEvent, "evt_sub_created_1")
     assert evt is not None
-    assert evt.event_type == "subscription.created"
-    assert evt.org_id == "org-1"
+    assert evt.event_type == "customer.subscription.created"
+    assert evt.org_id == user_id
 
 
-async def test_subscription_created_upserts_unknown_org(
-    app, db_session, secret_env
+async def test_subscription_created_org_plan_via_metadata(
+    app, db_session, secret_env, rpc_spy, monkeypatch
 ) -> None:
-    payload = {
-        "id": "evt_sub_created_2",
-        "type": "subscription.created",
-        "data": {"client_reference_id": "org-unseen", "plan": "org"},
-    }
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"X-Polar-Signature": _sign(body), "Content-Type": "application/json"}
+    _stub_event(monkeypatch)
+    user_id = str(uuid.uuid4())
+    # No items[] array → plan falls back to metadata.plan.
+    obj = {"metadata": {"user_id": user_id, "plan": "org"}, "status": "active"}
+    body = _evt("evt_sub_created_2", "customer.subscription.created", obj)
 
-    resp = await _post(app, body, headers)
+    resp = await _post(app, body, _SIG)
     assert resp.status_code == 200, resp.text
 
-    org = db_session.get(Org, "org-unseen")
-    assert org is not None, "unknown org should be upserted"
-    assert org.plan == "org"
+    assert len(rpc_spy) == 1
+    assert rpc_spy[0][1]["p_plan_name"] == "Org"
 
 
-async def test_subscription_created_invalid_plan_400(
-    app, db_session, secret_env
+async def test_subscription_created_invalid_plan_skips_mutation(
+    app, db_session, secret_env, rpc_spy, monkeypatch
 ) -> None:
-    payload = {
-        "id": "evt_sub_created_3",
-        "type": "subscription.created",
-        "data": {"client_reference_id": "org-3", "plan": "pro"},
+    _stub_event(monkeypatch)
+    user_id = str(uuid.uuid4())
+    obj = {
+        "metadata": {"user_id": user_id, "plan": "enterprise_ultra"},
+        "status": "active",
     }
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"X-Polar-Signature": _sign(body), "Content-Type": "application/json"}
+    body = _evt("evt_sub_created_3", "customer.subscription.created", obj)
 
-    resp = await _post(app, body, headers)
-    assert resp.status_code == 400, resp.text
+    resp = await _post(app, body, _SIG)
+    # Unknown plan is logged + skipped (no 400): ledger row written, no RPC.
+    assert resp.status_code == 200, resp.text
+    assert rpc_spy == []
+    assert db_session.get(BillingEvent, "evt_sub_created_3") is not None
 
-    assert db_session.get(BillingEvent, "evt_sub_created_3") is None
-    assert db_session.get(Org, "org-3") is None
+
+async def test_subscription_deleted_cancels(
+    app, db_session, secret_env, rpc_spy, monkeypatch
+) -> None:
+    _stub_event(monkeypatch)
+    user_id = str(uuid.uuid4())
+    obj = {"metadata": {"user_id": user_id}, "status": "canceled"}
+    body = _evt("evt_sub_deleted_1", "customer.subscription.deleted", obj)
+
+    resp = await _post(app, body, _SIG)
+    assert resp.status_code == 200, resp.text
+
+    assert len(rpc_spy) == 1
+    fn, args = rpc_spy[0]
+    assert fn == "cancel_user_subscription_from_polar"
+    assert args["p_user_id"] == user_id
 
 
 async def test_webhook_503_when_secret_unset(app, db_session, monkeypatch) -> None:
-    monkeypatch.delenv("POLAR_WEBHOOK_SECRET", raising=False)
-    payload = {"id": "evt_x", "type": "checkout.completed", "data": {}}
-    body = json.dumps(payload).encode("utf-8")
-    headers = {"X-Polar-Signature": _sign(body), "Content-Type": "application/json"}
-
-    resp = await _post(app, body, headers)
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    body = _evt("evt_x", "checkout.session.completed", {})
+    resp = await _post(app, body, _SIG)
     assert resp.status_code == 503, resp.text

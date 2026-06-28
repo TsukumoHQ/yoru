@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,6 +17,11 @@ def mock_supabase():
     supabase = MagicMock()
     supabase.query_records = MagicMock()
     supabase.client = MagicMock()
+    # _check_feature_access short-circuits to the in-memory cache when
+    # enable_cache is truthy; an unconfigured MagicMock cache returns a
+    # MagicMock for cache.get(...)["has_access"]. Disable so tests exercise
+    # the query path they stub via query_records.side_effect.
+    supabase.enable_cache = False
     return supabase
 
 
@@ -306,8 +310,7 @@ class TestFeatureAccessHierarchy:
         mock_supabase,
     ):
         """Test expired grant is ignored and falls through to next level."""
-        # Arrange
-        expired_time = datetime.now(timezone.utc).isoformat()
+        # Arrange — the grant below carries a hardcoded past expiry.
         mock_supabase.query_records.side_effect = [
             [{"id": str(sample_feature_id), "key": "test_feature"}],  # Feature
             [

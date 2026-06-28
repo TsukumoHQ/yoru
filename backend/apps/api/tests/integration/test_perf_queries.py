@@ -19,7 +19,8 @@ only (matches the ≤3 / ≤5 thresholds specified in the brief).
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+import uuid
+from datetime import UTC, datetime, timedelta
 
 # Point the receipt package at in-memory sqlite BEFORE it gets imported.
 os.environ.setdefault("RECEIPT_DB_URL", "sqlite:///:memory:")
@@ -30,16 +31,22 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import event  # noqa: E402
 from sqlalchemy.engine import Engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
-from sqlmodel import Session as SQLSession, SQLModel, create_engine  # noqa: E402
+from sqlmodel import Session as SQLSession  # noqa: E402
+from sqlmodel import SQLModel, create_engine
 
+from apps.api.api.dependencies.auth import (  # noqa: E402
+    get_current_user_id,
+    get_current_user_token,
+)
 from apps.api.api.routers.receipt.dashboard_router import DashboardRouter  # noqa: E402
 from apps.api.api.routers.receipt.db import get_session  # noqa: E402
 from apps.api.api.routers.receipt.deps import require_current_user  # noqa: E402
-from apps.api.api.routers.receipt.models import Event, Session as SessionRow  # noqa: E402
+from apps.api.api.routers.receipt.models import Event  # noqa: E402
+from apps.api.api.routers.receipt.models import Session as SessionRow
 from apps.api.api.routers.receipt.sessions_router import SessionsRouter  # noqa: E402
 
-
 PERF_USER = "perf-user@test.local"
+PERF_USER_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 
 
 @pytest.fixture
@@ -72,12 +79,31 @@ def app(engine) -> FastAPI:
 
     _app.dependency_overrides[get_session] = _override_session
     _app.dependency_overrides[require_current_user] = lambda: PERF_USER
+    # DashboardRouter switched its auth deps to get_current_user_id /
+    # get_current_user_token (it no longer uses require_current_user), so the
+    # override above doesn't reach /dashboard/* — override those too.
+    _app.dependency_overrides[get_current_user_id] = lambda: PERF_USER_ID
+    _app.dependency_overrides[get_current_user_token] = lambda: "perf-token"
     return _app
 
 
 @pytest.fixture
 def client(app) -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _stub_visibility(monkeypatch):
+    """The sessions list handler lazily imports visible_emails_sync, which
+    resolves the caller's group co-members from the GLOBAL data store singleton.
+    That singleton leaks across the full suite (other tests repoint it at an
+    in-memory engine missing `datastore_records`), so stub it to the perf user's
+    own scope — this also keeps the N+1 query count deterministic.
+    """
+    monkeypatch.setattr(
+        "apps.api.api.services.access.visibility.visible_emails_sync",
+        lambda caller_email: {PERF_USER},
+    )
 
 
 class _QueryCounter:
@@ -105,14 +131,14 @@ class _QueryCounter:
 
 
 def _naive_utc(dt: datetime) -> datetime:
-    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.astimezone(UTC).replace(tzinfo=None)
 
 
 def _seed_sessions_with_events(
     engine, n_sessions: int, events_per_session: int, user: str = PERF_USER
 ) -> None:
     """Bulk-seed sessions + events in one transaction (seeding cost excluded)."""
-    base = _naive_utc(datetime.now(timezone.utc))
+    base = _naive_utc(datetime.now(UTC))
     with SQLSession(engine) as db:
         for i in range(n_sessions):
             sess = SessionRow(
@@ -136,8 +162,11 @@ def _seed_sessions_with_events(
         db.commit()
 
 
+PERF_WORKSPACE_ID = "ws-perf-team"
+
+
 def _seed_dashboard(engine, n_users: int, sessions_per_user: int) -> None:
-    base = _naive_utc(datetime.now(timezone.utc))
+    base = _naive_utc(datetime.now(UTC))
     with SQLSession(engine) as db:
         for u in range(n_users):
             email = f"user{u}@test.local"
@@ -146,6 +175,9 @@ def _seed_dashboard(engine, n_users: int, sessions_per_user: int) -> None:
                     SessionRow(
                         id=f"u{u}-s{i:03d}",
                         user=email,
+                        # Team dashboard scopes by the caller's workspace
+                        # membership; put the fixture team in one workspace.
+                        workspace_id=PERF_WORKSPACE_ID,
                         started_at=base - timedelta(minutes=i),
                         cost_usd=0.10 * i,
                         flagged=(i % 3 == 0),
@@ -176,9 +208,19 @@ def test_sessions_list_query_count(engine, client: TestClient) -> None:
     )
 
 
-def test_dashboard_team_query_count(engine, client: TestClient) -> None:
+def test_dashboard_team_query_count(
+    engine, client: TestClient, monkeypatch
+) -> None:
     """GET /api/v1/dashboard/team against 5 users × 10 sessions ≤ 5 queries."""
     _seed_dashboard(engine, n_users=5, sessions_per_user=10)
+
+    # _resolve_scope reads workspace membership from the Supabase service-role
+    # client, which isn't available in-process. Stub it so the perf caller is
+    # scoped to the seeded team workspace.
+    monkeypatch.setattr(
+        "apps.api.api.routers.receipt.dashboard_router._resolve_scope",
+        lambda user_id: ([PERF_WORKSPACE_ID], PERF_USER),
+    )
 
     with _QueryCounter() as counter:
         resp = client.get("/api/v1/dashboard/team")

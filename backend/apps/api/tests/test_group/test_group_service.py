@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -24,12 +24,16 @@ from apps.api.api.services.group.group_service import UserGroupService
 @pytest.fixture
 def mock_supabase():
     """Mock SupabaseManager for testing."""
+    # SupabaseManager / local_store data methods are SYNCHRONOUS (def, not
+    # async def) — the service awaits its own coroutines but calls these
+    # plainly. Mock them with MagicMock, not AsyncMock, or they return
+    # un-awaited coroutines ("object of type 'coroutine' has no len()").
     supabase = MagicMock()
-    supabase.query_records = AsyncMock()
-    supabase.get_record = AsyncMock()
-    supabase.insert_record = AsyncMock()
-    supabase.update_record = AsyncMock()
-    supabase.delete_record = AsyncMock()
+    supabase.query_records = MagicMock()
+    supabase.get_record = MagicMock()
+    supabase.insert_record = MagicMock()
+    supabase.update_record = MagicMock()
+    supabase.delete_record = MagicMock()
     supabase.client = MagicMock()
     return supabase
 
@@ -321,10 +325,13 @@ class TestCheckUserFeatureViaGroups:
         self, group_service, sample_user_id, mock_supabase
     ):
         """Test user has access to feature via group."""
-        # Arrange
-        mock_rpc = MagicMock()
-        mock_rpc.execute.return_value = MagicMock(data=[{"value": True}])
-        mock_supabase.client.rpc.return_value = mock_rpc
+        # Arrange — source is now provider-agnostic: it scans
+        # get_user_features_via_groups() for the key, not a Supabase RPC.
+        group_service.get_user_features_via_groups = AsyncMock(
+            return_value=[
+                MagicMock(feature_key="test_feature", value=True),
+            ]
+        )
 
         # Act
         result = await group_service.check_user_feature_via_groups(
@@ -333,17 +340,19 @@ class TestCheckUserFeatureViaGroups:
 
         # Assert
         assert result is True
-        mock_supabase.client.rpc.assert_called_once()
+        group_service.get_user_features_via_groups.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_check_user_no_feature_via_group(
         self, group_service, sample_user_id, mock_supabase
     ):
         """Test user has no access to feature via group."""
-        # Arrange
-        mock_rpc = MagicMock()
-        mock_rpc.execute.return_value = MagicMock(data=[])
-        mock_supabase.client.rpc.return_value = mock_rpc
+        # Arrange — no matching feature key among the user's group features.
+        group_service.get_user_features_via_groups = AsyncMock(
+            return_value=[
+                MagicMock(feature_key="other_feature", value=True),
+            ]
+        )
 
         # Act
         result = await group_service.check_user_feature_via_groups(
