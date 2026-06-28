@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
 # (set at docker-compose / release build time), defaulting to the current release.
 # Exposed on GET /api/v1/config so the CLI's `yoru update --server` can compare it
 # against the latest TsukumoHQ/yoru release tag.
-_API_VERSION = os.getenv("RECEIPT_VERSION", "0.2.0")
+_API_VERSION = os.getenv("RECEIPT_VERSION", "0.2.1")
 
 app = FastAPI(
     lifespan=lifespan,
