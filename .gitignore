@@ -77,3 +77,6 @@ backend/data/.auth_jwt_secret
 # Embedding cache (trovex / fastembed)
 .fastembed_cache/
 .vercel
+
+# install-smoke pre-release wheel (transient)
+install-smoke/_wheel/
