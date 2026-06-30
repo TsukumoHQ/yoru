@@ -190,6 +190,44 @@ export async function listSessions(filters: Filters): Promise<SessionList> {
   }
 }
 
+// ── Activity feed (GET /activity) ──────────────────────────────────────────
+// Group-scoped curated event stream — what agents DID, newest first. Backend
+// scopes it by the same visibility wall as the sessions list.
+interface RawActivity {
+  id: number
+  session_id: string
+  ts: string
+  user: string
+  agent: string
+  kind: string
+  tool?: string | null
+  path?: string | null
+  flags?: string[]
+}
+
+function mapActivity(r: RawActivity): import("../types/receipt").ActivityItem {
+  return {
+    id: r.id,
+    session_id: r.session_id,
+    at: r.ts,
+    user_email: r.user,
+    agent: r.agent,
+    kind: r.kind,
+    tool: r.tool ?? null,
+    path: r.path ?? null,
+    flags: normalizeFlags(r.flags),
+  }
+}
+
+export async function listActivity(
+  filters: Filters,
+): Promise<import("../types/receipt").ActivityList> {
+  const raw = await apiFetch<{ items: RawActivity[] }>(
+    `/activity${qs(filters) ? `?${qs(filters)}` : ""}`,
+  )
+  return { items: (raw.items ?? []).map(mapActivity) }
+}
+
 // Lightweight count probe for the /welcome activation gate. Sends ?limit=1 so
 // the backend doesn't serialize a full page just to decide zero-vs-nonzero.
 export async function getSessionsCount(): Promise<{ total: number }> {

@@ -113,3 +113,23 @@ export interface SessionList {
   items: Session[]
   total: number
 }
+
+/** One curated row of the group-scoped activity feed (GET /activity): what an
+ *  agent DID — a tool call, file edit, or error — with the owning session's
+ *  user+agent so the row reads "who · which agent — action". */
+export interface ActivityItem {
+  id: number
+  session_id: string
+  at: string
+  user_email: string
+  agent: string
+  /** Raw backend kind: "tool_use" | "file_change" | "error". */
+  kind: string
+  tool?: string | null
+  path?: string | null
+  flags: RedFlagKind[]
+}
+
+export interface ActivityList {
+  items: ActivityItem[]
+}

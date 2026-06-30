@@ -1,39 +1,37 @@
 import { useEffect, useRef } from "react"
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query"
-import { listSessions } from "../lib/api"
+import { listActivity } from "../lib/api"
 import { useFilters } from "../features/sessions/filters"
 import { FilterBar } from "../features/sessions/FilterBar"
-import { FeedCard } from "../features/sessions/FeedCard"
+import { ActivityRow } from "../features/sessions/ActivityRow"
 import { EmptySessionsState } from "../features/sessions/EmptySessionsState"
 import { Skeleton } from "../components/ui/Skeleton"
-import type { SessionList } from "../types/receipt"
+import type { ActivityList } from "../types/receipt"
 
-const PAGE = 20
+const PAGE = 40
 
-// Group-scoped reverse-chron feed (TSU-249). Reuses GET /sessions, which the
-// backend already scopes to own + group-mates (visible_emails_sync; admin all;
-// cross-group wall) and orders started_at DESC — so this is purely a denser,
-// paginated presentation of what the caller is already entitled to see.
+// Group-scoped activity feed: what agents DID, action by action, newest first.
+// Reuses GET /activity, which the backend scopes to own + group-mates (same
+// visible_emails_sync wall as the sessions list; cross-group wall). Authed
+// dashboard only — never the public /s/:id surface.
 export function FeedPage() {
   const filters = useFilters()
   const queryClient = useQueryClient()
 
-  const query = useInfiniteQuery<SessionList>({
-    queryKey: ["feed", filters],
+  const query = useInfiniteQuery<ActivityList>({
+    queryKey: ["activity", filters],
     queryFn: ({ pageParam }) =>
-      listSessions({ ...filters, limit: PAGE, offset: pageParam as number }),
+      listActivity({ ...filters, limit: PAGE, offset: pageParam as number }),
     initialPageParam: 0,
-    getNextPageParam: (_last, pages) => {
-      const loaded = pages.reduce((n, p) => n + p.items.length, 0)
-      const total = pages[0]?.total ?? 0
-      return loaded < total ? loaded : undefined
-    },
+    getNextPageParam: (lastPage, pages) =>
+      // A full page implies there may be more; a short page is the end.
+      lastPage.items.length === PAGE
+        ? pages.reduce((n, p) => n + p.items.length, 0)
+        : undefined,
   })
 
   const items = query.data?.pages.flatMap((p) => p.items) ?? []
 
-  // Infinite scroll: fetch the next page when a sentinel near the end scrolls
-  // into view.
   const sentinel = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = sentinel.current
@@ -54,18 +52,19 @@ export function FeedPage() {
   return (
     <div className="space-y-4">
       <header className="border-b border-dashed border-rule pb-4">
-        <h1 className="font-mono text-2xl font-semibold text-ink">Feed</h1>
+        <h1 className="font-mono text-2xl font-semibold text-ink">Activity</h1>
         <p className="mt-1 font-mono text-caption text-ink-muted">
-          Sessions you and your group ran — newest first.
+          What your agents are doing — tool calls, file edits, and red flags,
+          newest first.
         </p>
       </header>
 
       <FilterBar />
 
       {query.isPending ? (
-        <div role="status" aria-label="Loading feed" className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton.Card key={i} decorative />
+        <div role="status" aria-label="Loading activity" className="space-y-1">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton.ListRow key={i} decorative />
           ))}
         </div>
       ) : query.isError ? (
@@ -73,32 +72,32 @@ export function FeedPage() {
           message={
             query.error instanceof Error
               ? query.error.message
-              : "Failed to load the feed."
+              : "Failed to load activity."
           }
           onRetry={() =>
-            queryClient.invalidateQueries({ queryKey: ["feed"] })
+            queryClient.invalidateQueries({ queryKey: ["activity"] })
           }
         />
       ) : items.length === 0 ? (
         <EmptySessionsState />
       ) : (
         <>
-          <ul className="space-y-2">
-            {items.map((s) => (
-              <li key={s.id}>
-                <FeedCard session={s} />
+          <ul className="divide-y divide-dashed divide-rule">
+            {items.map((a) => (
+              <li key={a.id}>
+                <ActivityRow activity={a} />
               </li>
             ))}
           </ul>
           <div ref={sentinel} aria-hidden className="h-8" />
           {query.isFetchingNextPage && (
-            <div role="status" aria-label="Loading more" className="space-y-2">
-              <Skeleton.Card decorative />
+            <div role="status" aria-label="Loading more" className="space-y-1">
+              <Skeleton.ListRow decorative />
             </div>
           )}
           {!query.hasNextPage && (
             <p className="py-4 text-center font-mono text-micro text-ink-faint">
-              — end of feed —
+              — caught up —
             </p>
           )}
         </>

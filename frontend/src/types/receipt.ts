@@ -10,4 +10,6 @@ export type {
   Summary,
   Filters,
   SessionList,
+  ActivityItem,
+  ActivityList,
 } from "@receipt/ui"

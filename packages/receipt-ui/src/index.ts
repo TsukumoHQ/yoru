@@ -11,6 +11,8 @@ export type {
   Summary,
   Filters,
   SessionList,
+  ActivityItem,
+  ActivityList,
 } from "./types"
 
 // Utilities
