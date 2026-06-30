@@ -14,6 +14,29 @@ function updateParam(
   return next
 }
 
+// Quick date ranges. Each sets `from` to N days ago (day granularity, matching
+// the From/To date inputs) and clears `to`; "All" clears both. The backend
+// from_ts filter scopes the list AND the fleet totals, so picking a range
+// re-totals the whole set for that window.
+function daysAgoISODate(days: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return d.toISOString().slice(0, 10) // YYYY-MM-DD
+}
+const RANGES: { label: string; days: number }[] = [
+  { label: "24h", days: 1 },
+  { label: "7d", days: 7 },
+  { label: "30d", days: 30 },
+]
+
+const chipCls = (active: boolean) =>
+  "h-8 rounded-sm border px-2.5 font-mono text-micro tabular-nums " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 " +
+  "focus-visible:ring-offset-2 focus-visible:ring-offset-paper " +
+  (active
+    ? "border-accent-500 bg-accent-500/10 text-accent-500"
+    : "border-rule text-ink-muted hover:bg-sunken")
+
 const labelCls =
   "flex flex-col gap-1 font-mono text-micro uppercase tracking-wider text-ink-faint"
 const inputCls =
@@ -61,6 +84,18 @@ export function FilterBar() {
 
   const clearAll = () => setParams(new URLSearchParams())
 
+  // Set `from` to a quick range (days ago) and clear `to`; days=null → all time.
+  const setRange = (days: number | null) => {
+    setParams((prev) => {
+      const cleared = updateParam(prev, "to", null)
+      return updateParam(cleared, "from", days === null ? null : daysAgoISODate(days))
+    })
+  }
+  const activeRange = !toParam
+    ? RANGES.find((r) => fromParam === daysAgoISODate(r.days))?.label ?? null
+    : null
+  const isAllTime = !fromParam && !toParam
+
   const anyActive =
     !!userParam || !!fromParam || !!toParam || flagOnly || !!minCostParam || !!workspaceParam
 
@@ -80,6 +115,31 @@ export function FilterBar() {
           className={inputCls}
         />
       </label>
+
+      <div className={labelCls}>
+        <span>Range</span>
+        <div className="flex gap-1">
+          {RANGES.map((r) => (
+            <button
+              key={r.label}
+              type="button"
+              onClick={() => setRange(r.days)}
+              aria-pressed={activeRange === r.label}
+              className={chipCls(activeRange === r.label)}
+            >
+              {r.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setRange(null)}
+            aria-pressed={isAllTime}
+            className={chipCls(isAllTime)}
+          >
+            All
+          </button>
+        </div>
+      </div>
 
       <label className={labelCls + " w-full sm:w-40"}>
         <span>From</span>
