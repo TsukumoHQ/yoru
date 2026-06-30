@@ -155,6 +155,20 @@ function normalizeFlags(rules: string[] | undefined): import("../types/receipt")
   return out
 }
 
+// Collapse a raw {rule_id: count} map (e.g. SessionTotals.flags_by_kind) into
+// counts keyed by user-facing RedFlagKind. Used by the Fleet-totals rollup so
+// the breakdown matches the server's full-set totals.
+export function normalizeFlagCounts(
+  raw: Record<string, number>,
+): Map<import("../types/receipt").RedFlagKind, number> {
+  const m = new Map<import("../types/receipt").RedFlagKind, number>()
+  for (const [rule, n] of Object.entries(raw)) {
+    const k = normalizeFlag(rule)
+    if (k) m.set(k, (m.get(k) ?? 0) + n)
+  }
+  return m
+}
+
 function mapSession(r: RawSession): import("../types/receipt").Session {
   const start = Date.parse(r.started_at)
   const end = r.ended_at ? Date.parse(r.ended_at) : null
@@ -181,12 +195,16 @@ function mapSession(r: RawSession): import("../types/receipt").Session {
 
 export async function listSessions(filters: Filters): Promise<SessionList> {
   if (USE_MOCKS) return mockListSessions(filters)
-  const raw = await apiFetch<{ items: RawSession[]; total?: number }>(
-    `/sessions${qs(filters) ? `?${qs(filters)}` : ""}`,
-  )
+  const raw = await apiFetch<{
+    items: RawSession[]
+    total?: number
+    totals?: import("../types/receipt").SessionTotals
+  }>(`/sessions${qs(filters) ? `?${qs(filters)}` : ""}`)
   return {
     items: (raw.items ?? []).map(mapSession),
     total: raw.total ?? (raw.items ?? []).length,
+    // Server-computed fleet totals over the FULL filtered set (not the page).
+    totals: raw.totals,
   }
 }
 

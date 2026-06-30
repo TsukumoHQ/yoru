@@ -320,11 +320,27 @@ class SessionListItem(SQLModel):
     grade: Optional[str] = None
 
 
+class SessionTotals(SQLModel):
+    """Fleet rollup over the FULL filtered + visibility-scoped set — NOT just the
+    returned page. The dashboard "Fleet totals" panel must reflect every session
+    the caller can see, not the 50 most recent, or it silently undercounts."""
+    tool_count: int = 0
+    tokens_input: int = 0
+    tokens_output: int = 0
+    cost_usd: float = 0.0
+    flag_count: int = 0            # total red flags across all sessions
+    flagged_sessions: int = 0      # sessions with >= 1 flag
+    public_sessions: int = 0
+    # Raw rule_id → count; the frontend normalizes to user-facing kinds.
+    flags_by_kind: dict[str, int] = Field(default_factory=dict)
+
+
 class SessionListResponse(SQLModel):
     items: list[SessionListItem]
     total: int
     limit: int
     offset: int
+    totals: SessionTotals = Field(default_factory=SessionTotals)
 
 
 # ---------- Activity feed (cross-session event stream) ----------

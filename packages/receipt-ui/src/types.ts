@@ -109,9 +109,26 @@ export interface Filters {
   offset?: number
 }
 
+/** Fleet rollup over the FULL filtered + visibility-scoped set (not the page),
+ *  so the dashboard totals don't silently undercount. */
+export interface SessionTotals {
+  tool_count: number
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+  flag_count: number
+  flagged_sessions: number
+  public_sessions: number
+  /** Raw backend rule_id → count; normalize to RedFlagKind for display. */
+  flags_by_kind: Record<string, number>
+}
+
 export interface SessionList {
   items: Session[]
   total: number
+  /** Server-computed totals over the whole filtered set. Optional for
+   *  back-compat (older responses / mocks); UI falls back to page sums. */
+  totals?: SessionTotals
 }
 
 /** One curated row of the group-scoped activity feed (GET /activity): what an

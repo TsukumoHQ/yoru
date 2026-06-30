@@ -25,6 +25,7 @@ from .models import (
     SessionDetail,
     SessionListItem,
     SessionListResponse,
+    SessionTotals,
     ShareIn,
     ShareOut,
     TrailOut,
@@ -379,11 +380,7 @@ class SessionsRouter:
             .offset(offset)
             .limit(limit)
         )
-        count_stmt = select(func.count()).select_from(SessionRow).where(*filters)
-
         rows = db.exec(list_stmt).all()
-        total = db.exec(count_stmt).one()
-
         items = [SessionListItem.model_validate(r.model_dump()) for r in rows]
 
         # Grade each card with the SAME compute_score() the detail page uses, so
@@ -423,8 +420,39 @@ class SessionsRouter:
                     flags=row.flags,
                 ).grade
 
+        # Fleet totals over the FULL filtered + visibility-scoped set (NOT the
+        # page) — otherwise the dashboard's "Fleet totals" silently sums only the
+        # 50 most recent sessions. One thin column scan computes the totals AND
+        # the row count (so this replaces the separate COUNT query — still 3
+        # queries total). Summed in Python so the flags-by-kind breakdown stays
+        # exact without fragile JSON SQL.
+        totals = SessionTotals()
+        total = 0
+        agg_stmt = select(
+            SessionRow.tokens_input,
+            SessionRow.tokens_output,
+            SessionRow.tools_count,
+            SessionRow.cost_usd,
+            SessionRow.flags,
+            SessionRow.is_public,
+            SessionRow.flagged,
+        ).where(*filters)
+        for ti, to, tc, cost, flags, is_public, flagged in db.exec(agg_stmt).all():
+            total += 1
+            totals.tokens_input += ti or 0
+            totals.tokens_output += to or 0
+            totals.tool_count += tc or 0
+            totals.cost_usd += cost or 0.0
+            if is_public:
+                totals.public_sessions += 1
+            if flagged:
+                totals.flagged_sessions += 1
+            for f in flags or []:
+                totals.flags_by_kind[f] = totals.flags_by_kind.get(f, 0) + 1
+                totals.flag_count += 1
+
         return SessionListResponse(
-            items=items, total=total, limit=limit, offset=offset
+            items=items, total=total, limit=limit, offset=offset, totals=totals
         )
 
     def get_session_detail(

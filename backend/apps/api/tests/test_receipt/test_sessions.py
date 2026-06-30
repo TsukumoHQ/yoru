@@ -121,6 +121,37 @@ def test_list_includes_grade_matching_detail_compute(
     assert items[0]["grade"] in ("A", "B", "C", "D", "F")
 
 
+def test_totals_cover_full_set_not_just_page(client, db_session, alice_headers):
+    """Regression: Fleet totals must sum EVERY matching session, not the page.
+    With limit=1 the page has one item but totals still cover all three."""
+    for i, (ti, to, tc) in enumerate([(100, 10, 2), (200, 20, 3), (300, 30, 4)]):
+        db_session.add(SessionRow(
+            id=f"t{i}", user="alice",
+            started_at=BASE_TS + timedelta(minutes=i),
+            tokens_input=ti, tokens_output=to, tools_count=tc, flags=[],
+        ))
+    db_session.commit()
+
+    resp = client.get("/api/v1/sessions", params={"limit": 1}, headers=alice_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["items"]) == 1          # page is just one row…
+    t = body["totals"]
+    assert t["tokens_input"] == 600         # …but totals sum all three (100+200+300)
+    assert t["tokens_output"] == 60
+    assert t["tool_count"] == 9
+
+
+def test_totals_group_scoped(client, db_session, alice_headers):
+    """Totals respect the visibility wall — only alice's sessions count."""
+    _seed_four_sessions(db_session)  # alice: s1 $0.05, s3 $0.20; bob/carol excluded
+    resp = client.get("/api/v1/sessions", headers=alice_headers)
+    t = resp.json()["totals"]
+    assert abs(t["cost_usd"] - 0.25) < 1e-9       # not bob's 0.50 / carol's 1.00
+    assert t["flagged_sessions"] == 1             # s3; bob's flagged s2 excluded
+    assert t["flags_by_kind"] == {"shell_rm": 1}  # s3 only; no secret_aws from bob
+
+
 def test_list_grade_only_over_visible_sessions(client, db_session, alice_headers):
     """Confidentiality: grade is derived only from events of sessions the caller
     can already see. bob's session + events never enter alice's feed or its

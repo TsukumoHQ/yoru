@@ -1,11 +1,13 @@
 import { useMemo } from "react"
 import { formatCost } from "@receipt/ui"
+import { normalizeFlagCounts } from "../../lib/api"
 import type { Session, SessionList, RedFlagKind } from "../../types/receipt"
 
-// Fleet-level rollup across the listed sessions — the "totals" panel above the
-// Receipts table. Tokens / cost / tool-calls / flags sum the loaded items
-// (for a paginated backend that's the current page). Cost is API-EQUIVALENT
-// (what these runs would cost at per-token API rates), not a subscriber's bill.
+// Fleet-level rollup — the "totals" panel above the Receipts table. Uses the
+// server-computed totals over the FULL filtered + visibility-scoped set (so it
+// reflects every session, not just the loaded page). Falls back to summing the
+// page only for legacy responses / mocks that omit `totals`. Cost is
+// API-EQUIVALENT (per-token API rates), not a subscriber's bill.
 
 const RUBRIC = "font-mono text-caption uppercase tracking-wider text-ink-faint"
 
@@ -38,6 +40,22 @@ interface Totals {
 }
 
 function rollup(list: SessionList): Totals {
+  // Preferred path: the server's true totals over the full filtered set.
+  if (list.totals) {
+    const t = list.totals
+    return {
+      sessions: list.total,
+      toolCalls: t.tool_count,
+      tokensIn: t.tokens_input,
+      tokensOut: t.tokens_output,
+      cost: t.cost_usd,
+      flagCount: t.flag_count,
+      flagsByKind: normalizeFlagCounts(t.flags_by_kind),
+      publicCount: t.public_sessions,
+    }
+  }
+
+  // Fallback (legacy responses / mocks without `totals`): sum the loaded page.
   const items = list.items
   const flagsByKind = new Map<RedFlagKind, number>()
   let toolCalls = 0
