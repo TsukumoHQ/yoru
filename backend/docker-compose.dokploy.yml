@@ -1,0 +1,55 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: yoru_redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - redis_data:/data
+    networks:
+      - yoru_network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yoru-api:latest
+    container_name: yoru_api
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REDIS_URL=redis://redis:6379/0
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - API_DOMAIN=${API_DOMAIN}
+      - API_URL=${API_URL}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - yoru_network
+
+volumes:
+  redis_data:
+    name: yoru_redis_data
+
+networks:
+  yoru_network:
+    name: yoru_network
+    driver: bridge

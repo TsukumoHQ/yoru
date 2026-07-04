@@ -296,20 +296,29 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def load_secrets_from_docker(self) -> "Settings":
-        """Load secrets from Docker secrets files if available.
+        """Load secrets from environment variables or Docker secrets files.
 
-        Docker Compose mounts secrets at /run/secrets/<secret_name>.
-        This validator overrides environment variables with secret files if they exist.
+        Priority: Environment variables > Docker secrets > defaults
+        This ensures compatibility with both Docker Compose secrets and
+        platform injection (Dokploy, Kubernetes, etc.)
         """
-        # Override Supabase credentials from Docker secrets if available
-        if secret_url := read_secret("supabase_url"):
-            self.supabase_url = secret_url
+        # Supabase URL - environment variable takes priority
+        if not self.supabase_url or self.supabase_url.startswith("http"):
+            # Only try Docker secret if env var is not set or looks like a placeholder
+            if secret_url := read_secret("supabase_url"):
+                self.supabase_url = secret_url
 
-        if secret_anon_key := read_secret("supabase_anon_key"):
-            self.supabase_anon_key = secret_anon_key
+        # Supabase Anon Key - environment variable takes priority
+        if not self.supabase_anon_key or len(self.supabase_anon_key) < 20:
+            # Only try Docker secret if env var is not set or looks invalid
+            if secret_anon_key := read_secret("supabase_anon_key"):
+                self.supabase_anon_key = secret_anon_key
 
-        if secret_service_key := read_secret("supabase_service_key"):
-            self.supabase_service_key = secret_service_key
+        # Supabase Service Key - environment variable takes priority
+        if not self.supabase_service_key or len(self.supabase_service_key) < 20:
+            # Only try Docker secret if env var is not set or looks invalid
+            if secret_service_key := read_secret("supabase_service_key"):
+                self.supabase_service_key = secret_service_key
 
         return self
 
