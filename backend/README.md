@@ -186,7 +186,7 @@ WORKER_DOMAIN=worker.prod.yourdomain.com
 API_URL=https://api.prod.yourdomain.com
 
 # Update CORS origins (whitelist your frontend domains)
-CORS_ORIGINS=https://app.yourdomain.com,https://www.yourdomain.com
+CORS_ALLOWED_ORIGINS=https://app.yourdomain.com,https://www.yourdomain.com
 
 # Configure Supabase
 SUPABASE_URL=https://your-project.supabase.co

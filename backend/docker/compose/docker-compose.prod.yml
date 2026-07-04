@@ -5,7 +5,7 @@
 #   1. Configure SSL certificates in docker/config/nginx/ssl/
 #   2. Create secret files in docker/config/secrets/ (see secrets.example/ for templates)
 #   3. Update .env.production with your actual domain names
-#   4. Update CORS_ORIGINS in .env.production
+#   4. Update CORS_ALLOWED_ORIGINS in .env.production
 #
 # Secrets Management:
 #   Docker Compose secrets are used for sensitive credentials (Supabase keys, etc.)

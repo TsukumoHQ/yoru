@@ -117,7 +117,7 @@ fi
 
 echo -e "${YELLOW}Important: Verify these settings in $ENV_FILE:${NC}"
 echo "  - API_DOMAIN (your actual domain)"
-echo "  - CORS_ORIGINS (your frontend URLs)"
+echo "  - CORS_ALLOWED_ORIGINS (your frontend URLs)"
 echo "  - APP_ENV=production"
 echo "  - DISABLE_LOG_MASKING=false"
 echo ""

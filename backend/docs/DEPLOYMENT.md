@@ -347,7 +347,7 @@ API_DOMAIN=api.prod.example.com
 API_URL=https://api.prod.example.com
 
 # CORS (whitelist your frontend domains)
-CORS_ORIGINS=https://app.example.com,https://www.example.com
+CORS_ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
 
 # Ensure production settings
 APP_ENV=production

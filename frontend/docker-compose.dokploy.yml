@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    image: yoru-frontend:latest
+    container_name: yoru_frontend
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=${VITE_API_URL}
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+      - VITE_USE_MOCKS=${VITE_USE_MOCKS:-0}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+    networks:
+      - yoru_network
+
+networks:
+  yoru_network:
+    name: yoru_network
+    driver: bridge
