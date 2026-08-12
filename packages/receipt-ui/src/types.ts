@@ -13,6 +13,8 @@ export type FileOp = "create" | "edit" | "delete"
 export interface Session {
   id: string
   user_email: string
+  /** CLI/plugin source that streamed this session into Yoru. */
+  agent: string
   started_at: string
   ended_at: string | null
   duration_ms: number

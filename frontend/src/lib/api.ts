@@ -103,6 +103,7 @@ function qs(f: Filters): string {
 interface RawSession {
   id: string
   user: string
+  agent?: string
   started_at: string
   ended_at: string | null
   tools_count: number
@@ -180,6 +181,7 @@ function mapSession(r: RawSession): import("../types/receipt").Session {
   return {
     id: r.id,
     user_email: r.user,
+    agent: r.agent ?? "claude-code",
     started_at: r.started_at,
     ended_at: r.ended_at,
     duration_ms,

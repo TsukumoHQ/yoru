@@ -18,6 +18,7 @@ export type {
 
 // Utilities
 export { formatCost, formatDuration, formatRelative } from "./format"
+export { agentSourceLabel } from "./agentSource"
 export { redactTokens } from "./redact"
 export { useFilters, parseFilters } from "./filters"
 

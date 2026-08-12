@@ -1,6 +1,7 @@
 import { formatDuration, formatRelative } from "./format"
 import { RedFlagBadge } from "./RedFlagBadge"
 import type { SessionDetail } from "./types"
+import { agentSourceLabel } from "./agentSource"
 
 interface SessionHeroViewProps {
   session: SessionDetail
@@ -45,6 +46,7 @@ export function SessionHeroView({
   isReplayBusy = false,
 }: SessionHeroViewProps) {
   const shortId = session.id.slice(0, 4)
+  const sourceLabel = agentSourceLabel(session.agent)
   const summary = (session.summary ?? "").trim()
   // Token breakdown hidden pre-launch — see ROADMAP.md. Kept as a named
   // constant so re-enabling is a one-line render change.
@@ -177,6 +179,13 @@ export function SessionHeroView({
           </span>
           <span aria-hidden className="text-ink-faint">·</span>
           <span>session {shortId}</span>
+          <span aria-hidden className="text-ink-faint">·</span>
+          <span
+            className="rounded-sm border border-rule bg-sunken px-1.5 py-0.5"
+            title={`Event stream source: ${sourceLabel}`}
+          >
+            stream · {sourceLabel}
+          </span>
           <span aria-hidden className="text-ink-faint">·</span>
           <time
             dateTime={session.started_at}

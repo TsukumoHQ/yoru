@@ -1,5 +1,6 @@
 import { memo } from "react"
 import { Link, useSearchParams } from "react-router-dom"
+import { agentSourceLabel } from "@receipt/ui"
 import type { Session } from "../../types/receipt"
 import { formatCost, formatDuration, formatRelative } from "../../lib/format"
 import { RedFlagBadge } from "./RedFlagBadge"
@@ -15,6 +16,7 @@ const cellCls = "px-3 py-2 min-w-0"
 
 function SessionRowImpl({ session, gridCols, workspaceName }: SessionRowProps) {
   const running = session.ended_at === null
+  const sourceLabel = agentSourceLabel(session.agent)
   return (
     <Link
       to={`/s/${session.id}`}
@@ -47,6 +49,14 @@ function SessionRowImpl({ session, gridCols, workspaceName }: SessionRowProps) {
           workspaceId={session.workspace_id ?? null}
           name={workspaceName ?? null}
         />
+      </div>
+      <div className={cellCls}>
+        <span
+          className="inline-flex max-w-full items-center rounded-sm border border-rule bg-sunken px-1.5 py-0.5 font-mono text-micro text-ink-muted"
+          title={`Event stream source: ${sourceLabel}`}
+        >
+          <span className="truncate">{sourceLabel}</span>
+        </span>
       </div>
       <div className={cellCls + " font-mono text-caption text-ink-muted"} title={session.started_at}>
         {formatRelative(session.started_at)}
