@@ -92,6 +92,9 @@ function qs(f: Filters): string {
   if (f.workspace_id) p.set("workspace_id", f.workspace_id)
   if (f.limit !== undefined) p.set("limit", String(f.limit))
   if (f.offset !== undefined) p.set("offset", String(f.offset))
+  // Hide 0-activity shells (interrupted prompts, spawned sub-agents) from the
+  // dashboard. The API defaults to returning them for back-compat; we opt out.
+  p.set("include_empty", "false")
   return p.toString()
 }
 

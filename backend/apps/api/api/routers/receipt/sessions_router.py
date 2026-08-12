@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_
 from sqlmodel import Session as SQLSession, select
 
 import os
@@ -353,6 +353,7 @@ class SessionsRouter:
         flagged: Optional[bool] = None,
         min_cost: Optional[float] = None,
         workspace_id: Optional[str] = Query(None),
+        include_empty: bool = Query(True),
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
         db: SQLSession = Depends(get_session),
@@ -372,6 +373,24 @@ class SessionsRouter:
             filters.append(SessionRow.cost_usd >= min_cost)
         if workspace_id is not None:
             filters.append(SessionRow.workspace_id == workspace_id)
+        # Opt-in hiding of 0-activity shells: a transcript that only ever
+        # recorded a user prompt (interrupted before any assistant response, or
+        # a spawned sub-agent whose tokens attribute elsewhere) still
+        # materializes a SessionRow on its first event. These carry no
+        # tools/files/tokens and are pure noise. Default keeps the historical
+        # "return everything" contract (tests + API consumers rely on it); the
+        # dashboard passes ?include_empty=false to drop them. Applies to
+        # `filters`, so the totals aggregate below stays consistent (empties
+        # contribute nothing anyway).
+        if not include_empty:
+            filters.append(
+                or_(
+                    SessionRow.tools_count > 0,
+                    SessionRow.files_count > 0,
+                    SessionRow.tokens_input > 0,
+                    SessionRow.tokens_output > 0,
+                )
+            )
 
         list_stmt = (
             select(SessionRow)
