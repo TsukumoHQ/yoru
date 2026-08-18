@@ -42,6 +42,7 @@ from .models import (
 from .models import (
     Session as SessionRow,
 )
+from . import vcs
 from .red_flags import _SECRET_PATTERNS
 from .scoring import compute_score
 from .sessions_router import _enrich_events, _summarize_files_changed
@@ -95,9 +96,12 @@ def _if_none_match(header: str | None, etag: str) -> bool:
 _POSIX_HOME_RE = re.compile(r"(?:/Users|/home|/root)/[^/\s\"']+")
 _WIN_HOME_RE = re.compile(r"[A-Za-z]:\\Users\\[^\\\s\"']+")
 # Git remote URLs carry owner/repo identity. Known hosts only (conservative).
+# The host allowlist is derived from the VCS registry (vcs.all_hosts) so adding
+# a provider there updates redaction too — one source of truth.
+_GIT_HOSTS_ALT = "|".join(re.escape(h) for h in vcs.all_hosts())
 _GIT_REMOTE_RE = re.compile(
     r"(?:git@|(?:https?|ssh)://(?:[^@/\s]+@)?)"
-    r"(?:github\.com|gitlab\.com|bitbucket\.org|ssh\.dev\.azure\.com|dev\.azure\.com)"
+    r"(?:" + _GIT_HOSTS_ALT + r")"
     r"[:/][\w.-]+/[\w.-]+?(?:\.git)?(?=[\s\"')\]]|$)"
 )
 

@@ -58,6 +58,17 @@ from .github_endpoints import (
     get_github_status,
     list_github_repos,
 )
+from .bitbucket_endpoints import (
+    AutoRouteIn as BitbucketAutoRouteIn,
+    BitbucketConnectIn,
+    BitbucketRepoOut,
+    BitbucketStatusOut,
+    auto_route_repos as bitbucket_auto_route_repos,
+    connect_bitbucket,
+    disconnect_bitbucket,
+    get_bitbucket_status,
+    list_bitbucket_repos,
+)
 
 
 class MeRouter:
@@ -226,6 +237,37 @@ class MeRouter:
             status_code=200,
             summary="Bulk-assign a list of GitHub repos to a workspace",
         )(self.auto_route_my_github_repos)
+
+        # Bitbucket integration — twin of the GitHub surface above.
+        self.router.get(
+            "/bitbucket",
+            response_model=BitbucketStatusOut,
+            status_code=200,
+            summary="Status of the user's Bitbucket integration",
+        )(self.get_my_bitbucket_status)
+        self.router.post(
+            "/bitbucket/connect",
+            response_model=BitbucketStatusOut,
+            status_code=201,
+            summary="Persist a provider_token from the Supabase Bitbucket OAuth callback",
+        )(self.connect_my_bitbucket)
+        self.router.delete(
+            "/bitbucket",
+            status_code=204,
+            response_model=None,
+            summary="Disconnect Bitbucket for the caller",
+        )(self.disconnect_my_bitbucket)
+        self.router.get(
+            "/bitbucket/repos",
+            response_model=list[BitbucketRepoOut],
+            status_code=200,
+            summary="List the user's Bitbucket repos (paginated)",
+        )(self.list_my_bitbucket_repos)
+        self.router.post(
+            "/bitbucket/auto-route",
+            status_code=200,
+            summary="Bulk-assign a list of Bitbucket repos to a workspace",
+        )(self.auto_route_my_bitbucket_repos)
 
     async def get_me(
         self,
@@ -541,3 +583,47 @@ class MeRouter:
         token: str = Depends(get_current_user_token),
     ) -> dict:
         return await auto_route_repos(token, user_id, body)
+
+    async def get_my_bitbucket_status(
+        self,
+        request: Request,
+        user_id: UUID = Depends(get_current_user_id),
+        token: str = Depends(get_current_user_token),
+    ) -> BitbucketStatusOut:
+        return await get_bitbucket_status(token, user_id)
+
+    async def connect_my_bitbucket(
+        self,
+        request: Request,
+        body: BitbucketConnectIn,
+        user_id: UUID = Depends(get_current_user_id),
+        token: str = Depends(get_current_user_token),
+    ) -> BitbucketStatusOut:
+        return await connect_bitbucket(token, user_id, body)
+
+    async def disconnect_my_bitbucket(
+        self,
+        request: Request,
+        user_id: UUID = Depends(get_current_user_id),
+        token: str = Depends(get_current_user_token),
+    ) -> None:
+        return await disconnect_bitbucket(token, user_id)
+
+    async def list_my_bitbucket_repos(
+        self,
+        request: Request,
+        per_page: int = 100,
+        page: int = 1,
+        user_id: UUID = Depends(get_current_user_id),
+        token: str = Depends(get_current_user_token),
+    ) -> list[BitbucketRepoOut]:
+        return await list_bitbucket_repos(token, user_id, per_page=per_page, page=page)
+
+    async def auto_route_my_bitbucket_repos(
+        self,
+        request: Request,
+        body: BitbucketAutoRouteIn,
+        user_id: UUID = Depends(get_current_user_id),
+        token: str = Depends(get_current_user_token),
+    ) -> dict:
+        return await bitbucket_auto_route_repos(token, user_id, body)

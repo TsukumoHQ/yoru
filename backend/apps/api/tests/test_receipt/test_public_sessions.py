@@ -357,3 +357,17 @@ def test_public_404_is_not_cached(client, db_session):
     resp = client.get("/api/v1/public/sessions/s1")
     assert resp.status_code == 404
     assert resp.headers.get("Cache-Control") == "no-store"
+
+
+def test_scrub_masks_bitbucket_remote():
+    """The public-redaction git-remote regex is registry-driven — a Bitbucket
+    remote (a supported VCS) must be masked, not just github/gitlab."""
+    from apps.api.api.routers.receipt.public_sessions_router import (
+        _scrub_public_text,
+    )
+
+    out = _scrub_public_text("cloned git@bitbucket.org:acme/private.git today")
+    assert "acme/private" not in out
+    assert "[redacted:repo]" in out
+    out2 = _scrub_public_text("see https://bitbucket.org/acme/secret here")
+    assert "acme/secret" not in out2

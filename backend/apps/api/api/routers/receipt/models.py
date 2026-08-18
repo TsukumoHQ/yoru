@@ -348,6 +348,11 @@ class SessionListItem(SQLModel):
     flags: list[str]
     title: Optional[str] = None
     workspace_id: Optional[str] = None
+    # VCS provider slug (github|gitlab|bitbucket|azure) derived from the
+    # session's git_remote — the provider only, NEVER the owner/repo (that would
+    # leak identity). Lets the dashboard badge/filter by VCS. None when the
+    # remote is absent or points at an unrecognized host.
+    vcs: Optional[str] = None
     # Opt-in public share flag (#79) — surfaced so the dashboard can render
     # the "Make public" toggle state without a second round trip.
     is_public: bool = False

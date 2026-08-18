@@ -13,6 +13,7 @@ from sqlmodel import Session as SQLSession, select
 
 import os
 
+from . import vcs as vcs_registry
 from .db import get_session
 from .deps import require_current_user
 from dataclasses import asdict
@@ -353,6 +354,10 @@ class SessionsRouter:
         flagged: Optional[bool] = None,
         min_cost: Optional[float] = None,
         workspace_id: Optional[str] = Query(None),
+        vcs: Optional[str] = Query(
+            None,
+            description="Filter by VCS provider slug (github|gitlab|bitbucket|azure).",
+        ),
         include_empty: bool = Query(True),
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
@@ -373,6 +378,24 @@ class SessionsRouter:
             filters.append(SessionRow.cost_usd >= min_cost)
         if workspace_id is not None:
             filters.append(SessionRow.workspace_id == workspace_id)
+        # Search-by-VCS: match sessions whose frozen git_remote points at one of
+        # the provider's known hosts. Works off the indexed git_remote string —
+        # no schema change, no per-provider column. A provider can own >1 host
+        # (Azure ships https + ssh), so OR across them.
+        if vcs is not None:
+            slug = vcs.strip().lower()
+            if not vcs_registry.is_known_provider(slug):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"unknown vcs '{vcs}'; known: "
+                        f"{', '.join(vcs_registry.KNOWN_PROVIDERS)}"
+                    ),
+                )
+            hosts = vcs_registry.hosts_for(slug)
+            filters.append(
+                or_(*[SessionRow.git_remote.contains(h) for h in hosts])
+            )
         # Opt-in hiding of 0-activity shells: a transcript that only ever
         # recorded a user prompt (interrupted before any assistant response, or
         # a spawned sub-agent whose tokens attribute elsewhere) still
@@ -401,6 +424,10 @@ class SessionsRouter:
         )
         rows = db.exec(list_stmt).all()
         items = [SessionListItem.model_validate(r.model_dump()) for r in rows]
+        # Surface the VCS provider slug (never the full git_remote — that leaks
+        # owner/repo) so the dashboard can badge/filter by provider.
+        for item, row in zip(items, rows):
+            item.vcs = vcs_registry.provider_of_remote(row.git_remote)
 
         # Grade each card with the SAME compute_score() the detail page uses, so
         # the feed and the detail never disagree. The two event-derived inputs
