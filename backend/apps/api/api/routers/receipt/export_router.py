@@ -1,6 +1,7 @@
 """Receipt — batch sessions export. Contract: vault/BACKEND-API-V1.md §4.6.
 
-User-scoped only (Session.org_id lands with the v1 backfill). Streams via
+Org-walled (M5a, design 44a3774a §3/§6): the same tenant + email/group
+visibility as the sessions list (visible_scope_sync). Streams via
 StreamingResponse to keep memory bounded; cap 10k sessions per export with
 `X-Truncated: true` on overflow.
 """
@@ -12,8 +13,9 @@ import json
 from datetime import datetime, timezone
 from typing import Iterator, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import or_
 from sqlmodel import Session as SQLSession, select
 
 from .db import get_session
@@ -95,8 +97,24 @@ class ExportRouter:
         flagged_only: bool = Query(False),
         db: SQLSession = Depends(get_session),
         current_user: str = Depends(require_current_user),
+        x_organization_id: Optional[str] = Header(None, alias="X-Organization-Id"),
     ) -> StreamingResponse:
-        filters = [SessionRow.user == current_user]
+        # M5a (design 44a3774a §3/§6): org-wall the export — the last read path
+        # still owner-only. Same tenant wall as the sessions list: a member sees
+        # own+group within their org(s); a super-admin (visible None) sees all
+        # orgs, or the one named by a valid X-Organization-Id. NULL org_id
+        # (legacy/pre-M1 rows) counts as the default org.
+        from apps.api.api.services.access.visibility import (
+            _DEFAULT_ORG_ID,
+            visible_scope_sync,
+        )
+        visible, orgs = visible_scope_sync(current_user, x_organization_id)
+        filters = [] if visible is None else [SessionRow.user.in_(visible)]
+        if orgs is not None:
+            org_clause = SessionRow.org_id.in_(orgs)
+            if _DEFAULT_ORG_ID in orgs:
+                org_clause = or_(org_clause, SessionRow.org_id.is_(None))
+            filters.append(org_clause)
         if from_ is not None:
             filters.append(SessionRow.started_at >= from_)
         if to is not None:

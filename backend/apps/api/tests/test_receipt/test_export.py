@@ -135,3 +135,23 @@ def test_export_csv_shape_and_flagged_only(client, db_session, alice_headers):
 
 def test_export_requires_auth(client):
     assert client.get("/api/v1/sessions/export").status_code == 401
+
+
+def test_export_walls_cross_org(client, db_session, mint_token):
+    """M5a (design 44a3774a §3/§6): export is org-walled like the sessions list.
+
+    A CLI-token identity (no profile) is scoped to the default org. Seed a
+    default-org session (NULL org_id counts as default) plus a same-user
+    other-org session; only the default-org one may be exported — the
+    other-org row is walled out even though the caller owns it.
+    """
+    _raw, headers = mint_token("u-1")
+    _seed(db_session, "e-mine", "u-1", offset_sec=0)          # org_id NULL → default
+    _seed(db_session, "e-other", "u-1", offset_sec=10)
+    db_session.get(SessionRow, "e-other").org_id = "org-acme"  # other tenant
+    db_session.commit()
+
+    resp = client.get("/api/v1/sessions/export?format=json", headers=headers)
+    assert resp.status_code == 200, resp.text
+    ids = {json.loads(ln)["session_id"] for ln in resp.text.split("\n") if ln}
+    assert ids == {"e-mine"}  # org-acme session walled out of the export
