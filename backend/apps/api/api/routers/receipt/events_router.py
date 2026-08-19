@@ -414,6 +414,7 @@ class EventsRouter:
                     sess = SessionRow(
                         id=e.session_id,
                         user=effective_user,
+                        agent=e.agent or "claude-code",
                         started_at=ts,
                     )
                     session.add(sess)

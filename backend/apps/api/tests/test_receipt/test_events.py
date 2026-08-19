@@ -25,6 +25,48 @@ def _event(**overrides: Any) -> dict[str, Any]:
     return base
 
 
+def _codex_event(**overrides: Any) -> dict[str, Any]:
+    """Create a Codex-style event with agent field."""
+    base: dict[str, Any] = {
+        "session_id": "s-2",
+        "user": "u-1",
+        "kind": "tool_use",
+        "tool": "Bash",
+        "content": "ls -la",
+        "agent": "codex",
+    }
+    base.update(overrides)
+    return base
+
+
+def _opencode_event(**overrides: Any) -> dict[str, Any]:
+    """Create an OpenCode-style event with agent field."""
+    base: dict[str, Any] = {
+        "session_id": "s-3",
+        "user": "u-1",
+        "kind": "tool_use",
+        "tool": "Write",
+        "content": "console.log('hello')",
+        "agent": "opencode",
+    }
+    base.update(overrides)
+    return base
+
+
+def _cursor_event(**overrides: Any) -> dict[str, Any]:
+    """Create a Cursor-style event with agent field."""
+    base: dict[str, Any] = {
+        "session_id": "s-4",
+        "user": "u-1",
+        "kind": "tool_use",
+        "tool": "Edit",
+        "content": "fix bug",
+        "agent": "cursor",
+    }
+    base.update(overrides)
+    return base
+
+
 def test_happy_path_batch(client: TestClient, engine) -> None:
     events = [
         _event(
@@ -366,6 +408,219 @@ def test_kind_inferred_as_tool_use_for_bash_toolname(
     assert len(rows) == 1
     assert rows[0].kind == "tool_use"
     assert rows[0].tool == "Bash"
+
+
+def test_codex_agent_field(client: TestClient, engine, mint_token) -> None:
+    """POST with agent='codex' creates session with agent field set correctly."""
+    _, headers = mint_token("alice@example.com")
+    events = [
+        _codex_event(
+            session_id="codex-session-1",
+            kind="session_start",
+            tool=None,
+        ),
+        _codex_event(
+            session_id="codex-session-1",
+            kind="tool_use",
+            tool="Bash",
+            content="echo 'hello'",
+        ),
+    ]
+    resp = client.post(
+        "/api/v1/sessions/events",
+        json={"events": events},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["accepted"] == 2
+    assert resp.json()["session_ids"] == ["codex-session-1"]
+
+    with DBSession(engine) as s:
+        sess = s.get(SessionRow, "codex-session-1")
+    assert sess is not None
+    assert sess.agent == "codex"
+    assert sess.tools_count == 1
+
+
+def test_codex_agent_default_to_claude_code(client: TestClient, engine, mint_token) -> None:
+    """POST without agent field defaults to 'claude-code' for backward compatibility."""
+    _, headers = mint_token("alice@example.com")
+    event = _event(session_id="default-agent-session", kind="session_start")
+    resp = client.post(
+        "/api/v1/sessions/events",
+        json={"events": [event]},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+
+    with DBSession(engine) as s:
+        sess = s.get(SessionRow, "default-agent-session")
+    assert sess is not None
+    assert sess.agent == "claude-code"
+
+
+def test_opencode_agent_field(client: TestClient, engine, mint_token) -> None:
+    """POST with agent='opencode' creates session with agent field set correctly."""
+    _, headers = mint_token("alice@example.com")
+    events = [
+        _opencode_event(
+            session_id="opencode-session-1",
+            kind="session_start",
+            tool=None,
+        ),
+        _opencode_event(
+            session_id="opencode-session-1",
+            kind="tool_use",
+            tool="Write",
+            content="console.log('hello')",
+        ),
+    ]
+    resp = client.post(
+        "/api/v1/sessions/events",
+        json={"events": events},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["accepted"] == 2
+    assert resp.json()["session_ids"] == ["opencode-session-1"]
+
+    with DBSession(engine) as s:
+        sess = s.get(SessionRow, "opencode-session-1")
+    assert sess is not None
+    assert sess.agent == "opencode"
+    assert sess.tools_count == 1
+
+
+def test_cursor_agent_field(client: TestClient, engine, mint_token) -> None:
+    """POST with agent='cursor' creates session with agent field set correctly."""
+    _, headers = mint_token("alice@example.com")
+    events = [
+        _cursor_event(
+            session_id="cursor-session-1",
+            kind="session_start",
+            tool=None,
+        ),
+        _cursor_event(
+            session_id="cursor-session-1",
+            kind="tool_use",
+            tool="Edit",
+            content="fix bug",
+        ),
+    ]
+    resp = client.post(
+        "/api/v1/sessions/events",
+        json={"events": events},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["accepted"] == 2
+    assert resp.json()["session_ids"] == ["cursor-session-1"]
+
+    with DBSession(engine) as s:
+        sess = s.get(SessionRow, "cursor-session-1")
+    assert sess is not None
+    assert sess.agent == "cursor"
+    assert sess.tools_count == 1
+
+
+def test_multiple_agents_same_backend(client: TestClient, engine, mint_token) -> None:
+    """Test that sessions from different agents can coexist in the same backend."""
+    _, headers = mint_token("alice@example.com")
+
+    events = [
+        _codex_event(session_id="multi-agent-codex", kind="session_start", tool=None),
+        _opencode_event(session_id="multi-agent-opencode", kind="session_start", tool=None),
+        _cursor_event(session_id="multi-agent-cursor", kind="session_start", tool=None),
+        _event(session_id="multi-agent-claude", kind="session_start", tool=None),
+    ]
+
+    resp = client.post(
+        "/api/v1/sessions/events",
+        json={"events": events},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["accepted"] == 4
+
+    with DBSession(engine) as s:
+        codex_sess = s.get(SessionRow, "multi-agent-codex")
+        opencode_sess = s.get(SessionRow, "multi-agent-opencode")
+        cursor_sess = s.get(SessionRow, "multi-agent-cursor")
+        claude_sess = s.get(SessionRow, "multi-agent-claude")
+
+    assert codex_sess is not None and codex_sess.agent == "codex"
+    assert opencode_sess is not None and opencode_sess.agent == "opencode"
+    assert cursor_sess is not None and cursor_sess.agent == "cursor"
+    assert claude_sess is not None and claude_sess.agent == "claude-code"
+
+
+def test_unknown_agent_rejected(client: TestClient, mint_token) -> None:
+    """Test that unknown agent values are rejected with 422."""
+    _, headers = mint_token("alice@example.com")
+
+    event = {
+        "session_id": "bad-agent-session",
+        "kind": "session_start",
+        "agent": "unknown-agent",
+    }
+
+    resp = client.post(
+        "/api/v1/sessions/events",
+        json={"events": [event]},
+        headers=headers,
+    )
+    assert resp.status_code == 422, resp.text
+    assert "agent" in resp.text.lower()
+
+
+def test_mixed_agent_same_session_frozen_on_first_event(client: TestClient, engine, mint_token) -> None:
+    """Test that SessionRow.agent freezes on first event and ignores later events with different agents.
+
+    Since SessionRow.agent is set on session creation (first event), subsequent events
+    with a different agent value for the same session_id are ignored at the session level.
+    The events are still ingested, but the session.agent field remains frozen to the first value.
+    """
+    _, headers = mint_token("alice@example.com")
+
+    # First event with agent="codex"
+    events = [
+        _codex_event(
+            session_id="mixed-agent-session",
+            kind="session_start",
+            tool=None,
+        ),
+    ]
+
+    resp = client.post(
+        "/api/v1/sessions/events",
+        json={"events": events},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+
+    # Second event with agent="cursor" - should be ignored for session.agent
+    events = [
+        _cursor_event(
+            session_id="mixed-agent-session",
+            kind="tool_use",
+            tool="Edit",
+            content="fix bug",
+        ),
+    ]
+
+    resp = client.post(
+        "/api/v1/sessions/events",
+        json={"events": events},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+
+    # Verify session.agent is still "codex" (frozen on first event)
+    with DBSession(engine) as s:
+        sess = s.get(SessionRow, "mixed-agent-session")
+    assert sess is not None
+    assert sess.agent == "codex"  # Frozen to first agent
+    assert sess.tools_count == 1  # Second event was still ingested
 
 
 # ── title derivation: skip skill-load / command / hook preambles (QA polish) ──

@@ -21,6 +21,13 @@ EventKind = Literal[
     "session_end",
 ]
 
+Agent = Literal[
+    "claude-code",
+    "codex",
+    "opencode",
+    "cursor",
+]
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -29,7 +36,13 @@ def _utcnow() -> datetime:
 # ---------- Tables ----------
 
 class Session(SQLModel, table=True):
-    """Denormalized per-agent-session row."""
+    """Denormalized per-agent-session row.
+
+    IMPORTANT: The `agent` field is frozen on session creation (first event).
+    Subsequent events with a different agent value for the same session_id
+    do not change the session.agent field. This design ensures session
+    consistency and prevents ambiguous session attribution.
+    """
     __tablename__ = "sessions"
 
     id: str = Field(primary_key=True)
@@ -274,7 +287,7 @@ class PasswordResetToken(SQLModel, table=True):
 # ---------- Ingestion ----------
 
 class EventIn(SQLModel):
-    """Incoming event from a Claude Code hook.
+    """Incoming event from Claude Code, Codex, OpenCode, or Cursor hooks.
 
     `user` is optional: when absent, the events router derives it from the
     bearer token (see events_router + deps.get_current_user). Rejected with
@@ -289,6 +302,10 @@ class EventIn(SQLModel):
 
     `tool_name` is accepted as a JSON alias for `tool` to match the Claude
     Code hook stdin key verbatim without breaking v0 callers that send `tool`.
+
+    `agent` is optional: when absent, defaults to "claude-code" for backward
+    compatibility. Supported agents: "claude-code", "codex", "opencode", "cursor".
+    Unknown agent values are rejected with 422.
     """
     session_id: str
     user: Optional[str] = None
@@ -301,6 +318,7 @@ class EventIn(SQLModel):
     tokens_output: int = 0
     cost_usd: float = 0.0
     raw: Optional[dict] = None
+    agent: Optional[Agent] = None  # "claude-code", "codex", "opencode", "cursor"
     # Phase C — routing context. `cwd` comes from the Claude Code hook
     # payload; `git_remote` / `git_branch` are populated by the receipt.sh
     # hook from `git -C "$cwd"`, cached per session. When present, the
