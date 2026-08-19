@@ -416,6 +416,15 @@ class CookieAuthRouter:
             self._service = get_auth_provider()
         user = await self._service.get_user(user_id)
         if user is not None:
+            # Studio super-admin signal (design 44a3774a §4) — sourced from the
+            # instance role (profiles.role=='admin'); the SPA gates the cross-org
+            # switcher on this. Best-effort: a role-lookup failure just leaves it
+            # False rather than breaking session-aliveness.
+            try:
+                role = await self._service.get_user_role(user_id)
+                user.is_super_admin = role == "admin"
+            except Exception:
+                user.is_super_admin = False
             return SessionUserResponse(user=user)
         # Cookie validated but no profile row — return a minimal shell so the
         # SPA can still initialise its auth state.

@@ -27,6 +27,12 @@ class UserResponse(UserBase):
     email: str
     created_at: datetime
     updated_at: datetime
+    # Multi-tenant studio super-admin flag (design 44a3774a §4). True iff the
+    # instance role is 'admin' (profiles.role) — the studio operator who sees
+    # across all client-orgs. Sourced + set only on GET /auth/session/me;
+    # defaults False elsewhere (signup/signin), the SPA re-reads /session/me.
+    # The frontend gates the cross-org switcher on this bool (never the raw role).
+    is_super_admin: bool = False
 
 
 class UserUpdate(BaseModel):
