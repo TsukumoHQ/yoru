@@ -94,6 +94,31 @@ def test_ingest_writes_event_flags(client: TestClient, engine, ingest_headers) -
         assert sess.flagged is True
 
 
+def test_event_flags_carry_git_context(client: TestClient, engine, ingest_headers) -> None:
+    """steal#6: a red-flag record freezes the parent session's git context
+    (repo/branch/dir) so the risk log is self-explanatory without a join."""
+    ev = _event(
+        session_id="s-git", kind="file_change", tool="Edit", path=".env",
+        content="AWS_SECRET=AKIAIOSFODNN7EXAMPLE",
+        cwd="/home/dev/acme-app",
+        git_remote="git@github.com:acme/app.git",
+        git_branch="feature/x",
+    )
+    resp = client.post(
+        "/api/v1/sessions/events", json={"events": [ev]}, headers=ingest_headers
+    )
+    assert resp.status_code == 202, resp.text
+    with DBSession(engine) as s:
+        recs = s.exec(
+            select(EventFlag).where(EventFlag.session_id == "s-git")
+        ).all()
+        assert recs  # the .env AWS secret trips at least one rule
+        for r in recs:
+            assert r.cwd == "/home/dev/acme-app"
+            assert r.git_remote == "git@github.com:acme/app.git"
+            assert r.git_branch == "feature/x"
+
+
 def test_clean_event_writes_no_records(client: TestClient, engine, ingest_headers) -> None:
     resp = client.post("/api/v1/sessions/events", json={"events": [
         _event(session_id="s-clean", kind="tool_use", tool="Bash", content="ls -la"),

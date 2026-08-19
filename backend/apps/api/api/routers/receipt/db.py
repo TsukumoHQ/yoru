@@ -135,6 +135,19 @@ def init_db() -> None:
             ))
         _run_orgid_backfill_once(conn)
 
+        # steal#6 (study 6dcc43ce): git context on red-flag records. Denormalize
+        # the parent session's git fields onto event_flags so the risk log is
+        # self-explanatory without a join. Additive + idempotent; existing rows
+        # keep NULL (they predate capture). No backfill — historic flags have no
+        # frozen git context to recover.
+        _ef_cols = {
+            r[1]
+            for r in conn.execute(text("PRAGMA table_info(event_flags)")).fetchall()
+        }
+        for _col in ("git_branch", "git_remote", "cwd"):
+            if _col not in _ef_cols:
+                conn.execute(text(f"ALTER TABLE event_flags ADD COLUMN {_col} TEXT"))
+
         # Phase B migration: hook_tokens → cli_tokens + type split. Idempotent.
         has_cli = conn.execute(text(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='cli_tokens'"

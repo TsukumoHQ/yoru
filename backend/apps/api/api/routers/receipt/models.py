@@ -178,6 +178,16 @@ class EventFlag(SQLModel, table=True):
     category: str = Field(index=True)   # one of the six user-facing kinds
     severity: str = Field(index=True)   # critical | high | medium
     ts: datetime = Field(default_factory=_utcnow, index=True)
+    # steal#6 (study 6dcc43ce, TraceRoot): git context denormalized from the
+    # parent session at write time, so a red-flag record is self-explanatory —
+    # an auditor sees WHICH repo/branch/dir the flagged action ran in without a
+    # join to sessions. Same denormalization rationale as org_id above. A HEAD
+    # commit sha is NOT captured at ingest today (the session freezes only
+    # remote/branch/cwd); adding it is a follow-up that needs the CLI hook to
+    # send it.
+    git_branch: Optional[str] = Field(default=None)
+    git_remote: Optional[str] = Field(default=None)
+    cwd: Optional[str] = Field(default=None)
 
 
 class CliToken(SQLModel, table=True):

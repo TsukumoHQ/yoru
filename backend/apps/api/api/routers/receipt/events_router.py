@@ -653,6 +653,12 @@ class EventsRouter:
                         category=category_of(rule_id),
                         severity=severity_of(rule_id),
                         ts=ts,
+                        # steal#6: self-explanatory record — freeze the parent
+                        # session's git context onto the flag (which repo/branch/
+                        # dir the flagged action ran in), no join needed.
+                        git_branch=sess.git_branch,
+                        git_remote=sess.git_remote,
+                        cwd=sess.cwd,
                     ))
                 if e.session_id not in first_flagged_event_id and ev_row.id is not None:
                     first_flagged_event_id[e.session_id] = ev_row.id
