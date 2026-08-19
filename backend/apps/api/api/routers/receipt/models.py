@@ -200,6 +200,13 @@ class CliToken(SQLModel, table=True):
     user: str = Field(index=True)
     token_hash: str = Field(index=True, unique=True)
     token_type: str = Field(default="user", index=True)  # 'user' | 'service'
+    # Multi-tenant tenant key (M2, design 44a3774a §4). The client-org this
+    # token is bound to — token = (user, org_id). Ingest stamps sessions.org_id
+    # from this, so a client-org's devs can only write into their own org. NULL
+    # on legacy tokens (→ ingest falls back to DEFAULT_ORG_ID). Distinct from
+    # `workspace_id` below, which is the *routing* target (itself the field the
+    # old routing-`org_id` was renamed to); this is the TENANT key.
+    org_id: Optional[str] = Field(default=None, index=True)
     workspace_id: Optional[str] = Field(default=None, index=True)  # set if service — target workspace for fleet tokens
     minted_by_user_id: Optional[str] = Field(default=None)  # audit trail
     machine_hostname: Optional[str] = Field(default=None, max_length=256)
@@ -240,6 +247,10 @@ class ApiKey(SQLModel, table=True):
     user: str = Field(index=True)
     key_hash: str = Field(index=True, unique=True)
     key_prefix: str = Field(index=True)
+    # Multi-tenant tenant key (M2, design 44a3774a §4) — the client-org this key
+    # writes into; ingest stamps sessions.org_id from it. NULL on legacy keys
+    # (→ DEFAULT_ORG_ID fallback).
+    org_id: Optional[str] = Field(default=None, index=True)
     label: Optional[str] = Field(default=None, max_length=128)
     scopes: str = Field(default='["ingest"]')  # JSON list ⊆ API_KEY_SCOPES
     created_at: datetime = Field(default_factory=_utcnow)

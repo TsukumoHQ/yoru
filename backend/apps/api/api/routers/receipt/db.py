@@ -171,6 +171,30 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE cli_tokens ADD COLUMN scopes TEXT"))
             if "expires_at" not in cli_cols:
                 conn.execute(text("ALTER TABLE cli_tokens ADD COLUMN expires_at TEXT"))
+            # Multi-tenant tenant key (M2, design 44a3774a §4). token = (user,
+            # org_id). Added AFTER the org_id→workspace_id rename above, so the
+            # rename guard never eats it (workspace_id is present by here). This
+            # is the distinct TENANT org, NOT the old routing column.
+            if "org_id" not in cli_cols:
+                conn.execute(text("ALTER TABLE cli_tokens ADD COLUMN org_id TEXT"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_cli_tokens_org_id ON cli_tokens(org_id)"
+            ))
+
+        # Multi-tenant tenant key on api_keys (M2). Additive; the table is
+        # created by create_all above, so only the ALTER + index need a hand.
+        has_ak = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='api_keys'"
+        )).first() is not None
+        if has_ak:
+            ak_cols = {
+                r[1] for r in conn.execute(text("PRAGMA table_info(api_keys)")).fetchall()
+            }
+            if "org_id" not in ak_cols:
+                conn.execute(text("ALTER TABLE api_keys ADD COLUMN org_id TEXT"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_api_keys_org_id ON api_keys(org_id)"
+            ))
 
 
 def get_session() -> Iterator[Session]:

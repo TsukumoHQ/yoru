@@ -44,8 +44,9 @@ from apps.api.core.logging import get_logger
 
 from .billing.plan_limits import session_cap_for
 from .db import get_session
-from .deps import get_current_user
+from .deps import get_current_org, get_current_user
 from .models import (
+    DEFAULT_ORG_ID,
     Event,
     EventFlag,
     EventKind,
@@ -363,6 +364,7 @@ class EventsRouter:
         batch: EventsBatchIn,
         session: DBSession = Depends(get_session),
         current_user: str | None = Depends(get_current_user),
+        current_org: str | None = Depends(get_current_org),
     ) -> IngestAck | JSONResponse:
         """Persist a batch of events + update session aggregates atomically.
 
@@ -490,6 +492,10 @@ class EventsRouter:
                     sess = SessionRow(
                         id=e.session_id,
                         user=effective_user,
+                        # M2: pin the tenant org from the verified credential;
+                        # legacy/anon tokens (no org) fall back to the default
+                        # org. Frozen at session creation like workspace_id.
+                        org_id=current_org or DEFAULT_ORG_ID,
                         started_at=ts,
                     )
                     session.add(sess)
@@ -595,6 +601,7 @@ class EventsRouter:
             import json as _json
             ev_row = Event(
                 session_id=e.session_id,
+                org_id=sess.org_id,  # M2: denormalize the tenant org from the session
                 ts=ts,
                 kind=e.kind,
                 tool=e.tool,
@@ -625,6 +632,7 @@ class EventsRouter:
                 for rule_id in flags:
                     session.add(EventFlag(
                         session_id=e.session_id,
+                        org_id=sess.org_id,  # M2: per-org risk log
                         event_id=ev_row.id,
                         rule_id=rule_id,
                         category=category_of(rule_id),

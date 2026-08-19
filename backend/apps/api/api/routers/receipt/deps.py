@@ -222,6 +222,44 @@ def get_current_user(
     return _resolve_from_cookie(request)
 
 
+def get_current_org(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias=_API_KEY_HEADER),
+    session: DBSession = Depends(get_session),
+) -> str | None:
+    """Resolve the tenant org_id bound to the caller's credential (M2, design
+    44a3774a §4), or None when the credential carries no org (legacy token, or
+    a dashboard cookie).
+
+    Ingest stamps ``sessions.org_id`` from this, falling back to
+    ``DEFAULT_ORG_ID`` when None — so a client-org's devs can only write into
+    their own org. Bearer/API-key only; the cookie path returns None (dashboard
+    org selection is resolved by membership, not the token).
+    """
+    if authorization is not None:
+        if not authorization.startswith(_BEARER_PREFIX):
+            return None
+        token = authorization[len(_BEARER_PREFIX):].strip()
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        row = session.exec(
+            select(HookToken).where(
+                HookToken.token_hash == token_hash,
+                HookToken.revoked_at.is_(None),  # type: ignore[union-attr]
+            )
+        ).first()
+        return row.org_id if row is not None else None
+    if x_api_key is not None:
+        key_hash = hashlib.sha256(x_api_key.encode("utf-8")).hexdigest()
+        row = session.exec(
+            select(ApiKey).where(
+                ApiKey.key_hash == key_hash,
+                ApiKey.revoked_at.is_(None),  # type: ignore[union-attr]
+            )
+        ).first()
+        return row.org_id if row is not None else None
+    return None
+
+
 def require_current_user(
     request: Request,
     authorization: str | None = Header(default=None),
