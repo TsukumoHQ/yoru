@@ -10,11 +10,15 @@ interface SessionRowProps {
   gridCols: string
   /** Human-readable label for the session's workspace (if known). */
   workspaceName?: string | null
+  /** Org label to badge (super-admin cross-org view only). When undefined the
+   *  org badge is hidden — a regular member's rows are all their own org, so a
+   *  per-row org tag would be noise. */
+  orgLabel?: string | null
 }
 
 const cellCls = "px-3 py-2 min-w-0"
 
-function SessionRowImpl({ session, gridCols, workspaceName }: SessionRowProps) {
+function SessionRowImpl({ session, gridCols, workspaceName, orgLabel }: SessionRowProps) {
   const running = session.ended_at === null
   return (
     <Link
@@ -45,6 +49,7 @@ function SessionRowImpl({ session, gridCols, workspaceName }: SessionRowProps) {
       </div>
       <div className={cellCls}>
         <div className="flex flex-wrap items-center gap-1">
+          {orgLabel != null && <OrgBadge label={orgLabel} />}
           <WorkspaceBadge
             workspaceId={session.workspace_id ?? null}
             name={workspaceName ?? null}
@@ -87,6 +92,20 @@ function SessionRowImpl({ session, gridCols, workspaceName }: SessionRowProps) {
 }
 
 export const SessionRow = memo(SessionRowImpl)
+
+/** Owning-organization badge — a non-interactive tag shown in the studio
+ *  super-admin cross-org view so each row's org is legible. Org selection is
+ *  the header switcher's job, so this is a label, not a filter button. */
+function OrgBadge({ label }: { label: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-sm border border-accent-500/40 bg-accent-500/5 px-1.5 py-0.5 font-mono text-micro text-accent-500"
+      title={`Organization · ${label}`}
+    >
+      {label}
+    </span>
+  )
+}
 
 /** Workspace badge that filters the sessions list on click. */
 function WorkspaceBadge({

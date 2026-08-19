@@ -1,7 +1,9 @@
 import { useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { listSessions, listWorkspaces, type Workspace } from "../lib/api"
+import { listOrganizations, listSessions, listWorkspaces, type Workspace } from "../lib/api"
 import { useSelectedOrgId } from "../lib/org-scope"
+import { useSession } from "../auth/useSession"
+import { useInstanceConfig } from "../lib/config"
 import { FilterBar } from "../features/sessions/FilterBar"
 import { FleetStats } from "../features/sessions/FleetStats"
 import { useFilters } from "../features/sessions/filters"
@@ -12,7 +14,29 @@ import type { SessionList } from "../types/receipt"
 export function SessionsListPage() {
   const filters = useFilters()
   const orgId = useSelectedOrgId()
+  const { user } = useSession()
+  const config = useInstanceConfig()
   const queryClient = useQueryClient()
+
+  // Studio super-admin viewing ALL orgs (no single org selected) — badge each
+  // row with its org so a mixed-org list is legible. A specific-org selection
+  // or a regular member makes every row the same org, so the badge is skipped.
+  const showOrg = !!user?.is_super_admin && !config.single_org && !orgId
+
+  const orgsQuery = useQuery({
+    queryKey: ["orgs", "switcher"],
+    queryFn: listOrganizations,
+    enabled: showOrg,
+    staleTime: 60_000,
+    meta: { silent: true },
+  })
+
+  const orgLabelById = useMemo(() => {
+    if (!showOrg) return undefined
+    const m = new Map<string, string>()
+    for (const o of orgsQuery.data ?? []) m.set(o.id, o.name)
+    return m
+  }, [showOrg, orgsQuery.data])
 
   // orgId is part of the key so a super-admin org switch refetches; the id is
   // forwarded as X-Organization-Id inside listSessions (lib/api orgHeaders).
@@ -59,6 +83,7 @@ export function SessionsListPage() {
         <SessionsTable
           sessions={query.data.items}
           workspaceNameById={workspaceNameById}
+          orgLabelById={orgLabelById}
         />
       )}
     </div>

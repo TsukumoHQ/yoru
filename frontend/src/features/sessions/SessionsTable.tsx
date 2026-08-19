@@ -5,6 +5,10 @@ import { SessionRow } from "./SessionRow"
 interface SessionsTableProps {
   sessions: Session[]
   workspaceNameById?: Map<string, string>
+  /** When set (studio super-admin cross-org view), each row shows an org badge
+   *  resolved from this map — org name if known, otherwise the short id passed
+   *  in. Undefined → no org badge (a member's rows are all their own org). */
+  orgLabelById?: Map<string, string>
 }
 
 // Shared responsive grid template — every row (header + data) uses the same.
@@ -17,7 +21,7 @@ const GRID_COLS =
 const headerCellCls =
   "px-3 py-2 text-left font-mono text-micro uppercase tracking-wider text-ink-faint"
 
-export function SessionsTable({ sessions, workspaceNameById }: SessionsTableProps) {
+export function SessionsTable({ sessions, workspaceNameById, orgLabelById }: SessionsTableProps) {
   if (sessions.length === 0) return <SessionsTableEmpty />
   return (
     <div className="overflow-hidden rounded-sm border border-rule bg-surface">
@@ -41,6 +45,11 @@ export function SessionsTable({ sessions, workspaceNameById }: SessionsTableProp
               gridCols={GRID_COLS}
               workspaceName={
                 s.workspace_id && workspaceNameById?.get(s.workspace_id)
+              }
+              orgLabel={
+                orgLabelById && s.org_id
+                  ? orgLabelById.get(s.org_id) ?? s.org_id.slice(0, 6)
+                  : undefined
               }
             />
           </li>

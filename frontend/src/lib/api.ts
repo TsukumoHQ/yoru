@@ -127,6 +127,7 @@ interface RawSession {
   flags: string[]
   title?: string | null
   workspace_id?: string | null
+  org_id?: string | null
   is_public?: boolean
   grade?: string | null
   vcs?: string | null
@@ -219,6 +220,7 @@ function mapSession(r: RawSession): import("../types/receipt").Session {
     flags,
     title: r.title ?? null,
     workspace_id: r.workspace_id ?? null,
+    org_id: r.org_id ?? null,
     is_public: Boolean(r.is_public),
     grade: r.grade ?? null,
     vcs: normalizeVcs(r.vcs),
