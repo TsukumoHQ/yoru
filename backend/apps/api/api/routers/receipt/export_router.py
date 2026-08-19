@@ -91,7 +91,7 @@ class ExportRouter:
         self,
         from_: Optional[datetime] = Query(None, alias="from"),
         to: Optional[datetime] = Query(None),
-        format: Literal["json", "csv"] = Query("json"),
+        format: Literal["json", "csv", "otlp"] = Query("json"),
         flagged_only: bool = Query(False),
         db: SQLSession = Depends(get_session),
         current_user: str = Depends(require_current_user),
@@ -134,6 +134,29 @@ class ExportRouter:
                 f'attachment; filename="receipt-export-{stamp}.csv"'
             )
             return StreamingResponse(gen_csv(), media_type="text/csv", headers=headers)
+
+        if format == "otlp":
+            # OTel-GenAI interop export (design §1/§8): one OTLP/JSON trace
+            # (ExportTraceServiceRequest) per session, one per line — JSONL of
+            # traces keeps the streaming + 10k-cap contract instead of buffering
+            # one giant array. Owner-scoped, full fidelity (uncapped raw payload
+            # + chain overlay). Any OTel backend can ingest each line as-is.
+            from . import otel
+
+            def gen_otlp() -> Iterator[str]:
+                for r in rows:
+                    events = list(db.exec(
+                        select(Event)
+                        .where(Event.session_id == r.id)
+                        .order_by(Event.id.asc())
+                    ).all())
+                    yield json.dumps(otel.trace_from_rows(r, events), default=str) + "\n"
+            headers["Content-Disposition"] = (
+                f'attachment; filename="receipt-export-{stamp}.otlp.jsonl"'
+            )
+            return StreamingResponse(
+                gen_otlp(), media_type="application/x-ndjson", headers=headers
+            )
 
         def gen_jsonl() -> Iterator[str]:
             for r in rows:

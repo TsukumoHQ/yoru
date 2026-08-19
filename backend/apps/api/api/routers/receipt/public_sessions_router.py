@@ -165,6 +165,80 @@ def _redact_event(ev_out, *, flags: list[str]) -> PublicEventOut:
     return PublicEventOut.model_validate(base)
 
 
+def _assemble_public_session(row: SessionRow, db: SQLSession) -> PublicSessionOut:
+    """Build the redacted public view of a shared session from its rows.
+
+    Extracted so both the JSON reader and the OTLP projection (S1) serve the
+    IDENTICAL redacted data — the OTLP endpoint can therefore never expose a
+    field the JSON endpoint withholds. PII fields (user, cwd, git_remote,
+    git_branch, workspace_id) are intentionally never listed here.
+    """
+    # Same event window as authed detail: last 1000 + any flagged rows outside
+    # that window. Flagged events carry the narrative; a silent drop would
+    # defeat the point of the public replay.
+    recent = db.exec(
+        select(Event)
+        .where(Event.session_id == row.id)
+        .order_by(Event.ts.desc())
+        .limit(1000)
+    ).all()
+    recent_ids = {e.id for e in recent}
+    flagged_extra = db.exec(
+        select(Event)
+        .where(Event.session_id == row.id)
+        .where(Event.flags != [])  # type: ignore[arg-type]
+    ).all()
+    for ev in flagged_extra:
+        if ev.id not in recent_ids and (ev.flags or []):
+            recent.append(ev)
+            recent_ids.add(ev.id)
+    events_asc = sorted(recent, key=lambda e: e.ts)
+
+    events_out = _enrich_events(events_asc)
+    events_public = [
+        _redact_event(e, flags=list(e.flags or [])) for e in events_out
+    ]
+    files_out = _summarize_files_changed(events_asc)
+    # Scrub absolute home paths out of the public file list.
+    for _f in files_out:
+        if getattr(_f, "path", None):
+            _f.path = _scrub_public_text(_f.path)
+
+    tool_call_count = sum(
+        1 for e in events_asc if e.kind in ("tool_use", "file_change")
+    )
+    error_count = sum(1 for e in events_asc if e.kind == "error")
+    score = compute_score(
+        files_count=row.files_count,
+        tools_called=row.tools_called,
+        tokens_output=row.tokens_output,
+        tool_call_count=tool_call_count,
+        error_count=error_count,
+        flags=row.flags,
+    )
+    score_out = ScoreBreakdown(**asdict(score))
+
+    return PublicSessionOut(
+        id=row.id,
+        agent=row.agent,
+        started_at=row.started_at,
+        ended_at=row.ended_at,
+        tools_count=row.tools_count,
+        files_count=row.files_count,
+        tokens_input=row.tokens_input,
+        tokens_output=row.tokens_output,
+        cost_usd=row.cost_usd,
+        flagged=row.flagged,
+        flags=list(row.flags or []),
+        title=_scrub_public_text(row.title),
+        files_changed=files_out,
+        tools_called=list(row.tools_called or []),
+        summary=_scrub_public_text(row.summary),
+        events=events_public,
+        score=score_out,
+    )
+
+
 class PublicSessionsRouter:
     """Unauthenticated reader for opt-in public sessions."""
 
@@ -186,6 +260,12 @@ class PublicSessionsRouter:
         self.router.get(
             "/{session_id}", response_model=PublicSessionOut
         )(decorated)
+        # S1 — OTel-GenAI projection of a PUBLIC session. Same 404/redaction
+        # gate; projects the SAME redacted PublicSessionOut, so it structurally
+        # cannot leak PII the JSON reader withholds (enduser.id/git.*/cwd/
+        # workspace.id are never on the public model).
+        decorated_otlp = limiter.limit("60/minute")(self.get_public_session_otlp)
+        self.router.get("/{session_id}/otlp")(decorated_otlp)
 
     def get_public_session(
         self,
@@ -221,76 +301,37 @@ class PublicSessionsRouter:
                 headers={"ETag": etag, "Cache-Control": _PUBLIC_CACHE_CONTROL},
             )
 
-        # Same event window as authed detail: last 1000 + any flagged rows
-        # outside that window. Flagged events carry the narrative; silent
-        # drop would defeat the point of the public replay.
-        recent = db.exec(
-            select(Event)
-            .where(Event.session_id == session_id)
-            .order_by(Event.ts.desc())
-            .limit(1000)
-        ).all()
-        recent_ids = {e.id for e in recent}
-        flagged_extra = db.exec(
-            select(Event)
-            .where(Event.session_id == session_id)
-            .where(Event.flags != [])  # type: ignore[arg-type]
-        ).all()
-        for ev in flagged_extra:
-            if ev.id not in recent_ids and (ev.flags or []):
-                recent.append(ev)
-                recent_ids.add(ev.id)
-        events_asc = sorted(recent, key=lambda e: e.ts)
-
-        events_out = _enrich_events(events_asc)
-        events_public = [
-            _redact_event(e, flags=list(e.flags or [])) for e in events_out
-        ]
-        files_out = _summarize_files_changed(events_asc)
-        # Scrub absolute home paths out of the public file list.
-        for _f in files_out:
-            if getattr(_f, "path", None):
-                _f.path = _scrub_public_text(_f.path)
-
-        tool_call_count = sum(
-            1 for e in events_asc if e.kind in ("tool_use", "file_change")
-        )
-        error_count = sum(1 for e in events_asc if e.kind == "error")
-        score = compute_score(
-            files_count=row.files_count,
-            tools_called=row.tools_called,
-            tokens_output=row.tokens_output,
-            tool_call_count=tool_call_count,
-            error_count=error_count,
-            flags=row.flags,
-        )
-        score_out = ScoreBreakdown(**asdict(score))
-
         # Cache the full payload at the edge + enable client revalidation.
         response.headers["ETag"] = etag
         response.headers["Cache-Control"] = _PUBLIC_CACHE_CONTROL
+        return _assemble_public_session(row, db)
 
-        # Explicit field-by-field construction — enumerating every public
-        # field here means a future addition to SessionRow doesn't
-        # accidentally leak into the public view. PII fields (user, cwd,
-        # git_remote, git_branch, workspace_id) are intentionally NOT
-        # listed.
-        return PublicSessionOut(
-            id=row.id,
-            agent=row.agent,
-            started_at=row.started_at,
-            ended_at=row.ended_at,
-            tools_count=row.tools_count,
-            files_count=row.files_count,
-            tokens_input=row.tokens_input,
-            tokens_output=row.tokens_output,
-            cost_usd=row.cost_usd,
-            flagged=row.flagged,
-            flags=list(row.flags or []),
-            title=_scrub_public_text(row.title),
-            files_changed=files_out,
-            tools_called=list(row.tools_called or []),
-            summary=_scrub_public_text(row.summary),
-            events=events_public,
-            score=score_out,
-        )
+    def get_public_session_otlp(
+        self,
+        session_id: str,
+        request: Request,  # required by slowapi's limit decorator
+        response: Response,
+        db: SQLSession = Depends(get_session),
+    ) -> dict:
+        """OTel-GenAI (OTLP/JSON) projection of a PUBLIC session.
+
+        Same 404-for-private/absent gate as the JSON reader. It projects the
+        SAME ``_assemble_public_session`` output the JSON endpoint returns, so
+        the redaction (no user/cwd/git_*/workspace_id; secret content stripped;
+        credentials scrubbed) carries over unchanged — the OTLP shape adds no
+        new leak surface.
+        """
+        from . import otel
+
+        row = db.exec(
+            select(SessionRow).where(SessionRow.id == session_id)
+        ).first()
+        if row is None or not row.is_public:
+            raise HTTPException(
+                status_code=404,
+                detail="session not found",
+                headers={"Cache-Control": "no-store"},
+            )
+        response.headers["Cache-Control"] = _PUBLIC_CACHE_CONTROL
+        public_out = _assemble_public_session(row, db)
+        return otel.trace_from_public(public_out)

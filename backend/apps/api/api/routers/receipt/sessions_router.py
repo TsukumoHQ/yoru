@@ -335,6 +335,10 @@ class SessionsRouter:
             self.get_session_replay_gif
         )
         self.router.get("/{session_id}/verify")(self.verify_session)
+        # S1 — OTel-GenAI projection (design trovex:28547568). Owner/group-
+        # visible, full fidelity. One OTLP/JSON trace for the session so any
+        # OTel backend can ingest yoru's trail directly.
+        self.router.get("/{session_id}/otlp")(self.get_session_otlp)
         self.router.delete("/{session_id}/tailer-events", status_code=204)(
             self.delete_tailer_events
         )
@@ -858,6 +862,36 @@ class SessionsRouter:
             "broken_at_event_id": broken_at,
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def get_session_otlp(
+        self,
+        session_id: str,
+        db: SQLSession = Depends(get_session),
+        current_user: str = Depends(require_current_user),
+    ) -> dict:
+        """OTel-GenAI projection of one session as an OTLP/JSON trace.
+
+        S1 of the compliance design (trovex:28547568). Same visibility rule as
+        detail/verify (owner or group-mate; 404 — not 403 — on cross-user so
+        existence never leaks). Full fidelity: the uncapped raw tool payloads
+        live in span *events* (redactable channel) and the tamper-evidence chain
+        hashes ride the ``yoru.*`` attribute overlay. Read-only — projects the
+        stored rows, changes nothing.
+        """
+        from . import otel
+
+        row = db.exec(
+            select(SessionRow).where(SessionRow.id == session_id)
+        ).first()
+        if not _session_visible(row, current_user):
+            raise HTTPException(status_code=404, detail="session not found")
+
+        events = db.exec(
+            select(Event)
+            .where(Event.session_id == session_id)
+            .order_by(Event.id.asc())
+        ).all()
+        return otel.trace_from_rows(row, list(events))
 
     # ---- Issue #79 — public share toggle (authed, owner-only, idempotent) ----
 
