@@ -13,10 +13,15 @@ from datetime import timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session as DBSession, select
+from sqlmodel import Session as DBSession
+from sqlmodel import select
 
 from apps.api.api.routers.receipt.models import (
-    Event, EventFlag, Session as SessionRow,
+    Event,
+    EventFlag,
+)
+from apps.api.api.routers.receipt.models import (
+    Session as SessionRow,
 )
 from apps.api.api.routers.receipt.red_flags import category_of, severity_of
 
@@ -54,7 +59,7 @@ def test_severity_tiers():
 
 # ── ingest writes first-class records, in sync with the JSON arrays ──────────
 
-def test_ingest_writes_event_flags(client: TestClient, engine) -> None:
+def test_ingest_writes_event_flags(client: TestClient, engine, ingest_headers) -> None:
     # A .env file_change carrying an AWS secret trips TWO rules:
     # secret_aws (content) + env_mutation (path).
     ev = _event(
@@ -63,7 +68,7 @@ def test_ingest_writes_event_flags(client: TestClient, engine) -> None:
         raw={"tool_name": "Edit", "tool_input": {
             "file_path": ".env", "new_string": "AWS_SECRET=AKIAIOSFODNN7EXAMPLE"}},
     )
-    resp = client.post("/api/v1/sessions/events", json={"events": [ev]})
+    resp = client.post("/api/v1/sessions/events", json={"events": [ev]}, headers=ingest_headers)
     assert resp.status_code == 202, resp.text
     assert resp.json()["flagged_sessions"] == ["s-flags"]
 
@@ -89,10 +94,10 @@ def test_ingest_writes_event_flags(client: TestClient, engine) -> None:
         assert sess.flagged is True
 
 
-def test_clean_event_writes_no_records(client: TestClient, engine) -> None:
+def test_clean_event_writes_no_records(client: TestClient, engine, ingest_headers) -> None:
     resp = client.post("/api/v1/sessions/events", json={"events": [
         _event(session_id="s-clean", kind="tool_use", tool="Bash", content="ls -la"),
-    ]})
+    ]}, headers=ingest_headers)
     assert resp.status_code == 202
     with DBSession(engine) as s:
         assert s.exec(
@@ -102,11 +107,11 @@ def test_clean_event_writes_no_records(client: TestClient, engine) -> None:
 
 # ── retention.expires_at populated from policy ───────────────────────────────
 
-def test_retention_null_by_default(client: TestClient, engine, monkeypatch) -> None:
+def test_retention_null_by_default(client: TestClient, engine, monkeypatch, ingest_headers) -> None:
     monkeypatch.delenv("RETENTION_DAYS", raising=False)
     client.post("/api/v1/sessions/events", json={"events": [
         _event(session_id="s-ret0", content="hi"),
-    ]})
+    ]}, headers=ingest_headers)
     with DBSession(engine) as s:
         sess = s.get(SessionRow, "s-ret0")
         ev = s.exec(select(Event).where(Event.session_id == "s-ret0")).first()
@@ -114,11 +119,11 @@ def test_retention_null_by_default(client: TestClient, engine, monkeypatch) -> N
     assert ev.retention_expires_at is None
 
 
-def test_retention_set_when_configured(client: TestClient, engine, monkeypatch) -> None:
+def test_retention_set_when_configured(client: TestClient, engine, monkeypatch, ingest_headers) -> None:
     monkeypatch.setenv("RETENTION_DAYS", "30")
     client.post("/api/v1/sessions/events", json={"events": [
         _event(session_id="s-ret30", content="hi"),
-    ]})
+    ]}, headers=ingest_headers)
     with DBSession(engine) as s:
         sess = s.get(SessionRow, "s-ret30")
         ev = s.exec(select(Event).where(Event.session_id == "s-ret30")).first()

@@ -34,7 +34,8 @@ def _mint(db_session, user: str, org_id: str | None):
 
 
 def _event(sid: str):
-    return {"session_id": sid, "kind": "tool_use", "tool": "Bash", "user": "x@a.dev"}
+    # No body `user` — attribution comes from the verified token (M2b).
+    return {"session_id": sid, "kind": "tool_use", "tool": "Bash"}
 
 
 def test_token_org_id_is_stamped_on_session_and_events(client, db_session, engine):
@@ -64,13 +65,12 @@ def test_orgless_token_falls_back_to_default_org(client, db_session, engine):
         assert s.get(SessionRow, "s-legacy-tok").org_id == DEFAULT_ORG_ID
 
 
-def test_anon_ingest_still_works_tagged_default_org(client, engine):
-    # v0 anon path (no Authorization) stays non-breaking in M2a — tagged default
-    # org. (M2b will reject this; here it must still succeed.)
+def test_anon_ingest_is_rejected_401(client, engine):
+    # M2b closed the anon path: no credential → 401, nothing written.
     r = client.post(
         "/api/v1/sessions/events",
         json={"events": [_event("s-anon")]},
     )
-    assert r.status_code == 202, r.text
+    assert r.status_code == 401, r.text
     with DBSession(engine) as s:
-        assert s.get(SessionRow, "s-anon").org_id == DEFAULT_ORG_ID
+        assert s.get(SessionRow, "s-anon") is None

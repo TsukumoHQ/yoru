@@ -15,9 +15,7 @@ import logging
 import os
 import re
 import uuid
-from datetime import datetime, timezone
-
-import httpx
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -31,16 +29,16 @@ def _naive_utc(d: datetime | None) -> datetime:
     DB is naive; inputs may be aware. Unifying here prevents aware/naive
     comparison errors when merging aggregates across batches."""
     if d is None:
-        d = datetime.now(timezone.utc)
+        d = datetime.now(UTC)
     if d.tzinfo is not None:
-        d = d.astimezone(timezone.utc).replace(tzinfo=None)
+        d = d.astimezone(UTC).replace(tzinfo=None)
     return d
-
-from libs.log_manager.controller import LoggingController
 
 from apps.api.api.middlewares.metrics import receipt_events_ingested_total
 from apps.api.api.routers.billing.models import Org
+from apps.api.api.services.retention import retention_expires_at as _retention_expires_at
 from apps.api.core.logging import get_logger
+from libs.log_manager.controller import LoggingController
 
 from .billing.plan_limits import session_cap_for
 from .db import get_session
@@ -52,13 +50,13 @@ from .models import (
     EventKind,
     EventsBatchIn,
     IngestAck,
+)
+from .models import (
     Session as SessionRow,
 )
 from .pricing import compute_cost_usd, summarize_tokens
 from .red_flags import category_of, scan_event, severity_of
-from apps.api.api.services.retention import retention_expires_at as _retention_expires_at
 from .summary_router import _build_summary
-
 
 _route_logger = logging.getLogger("apps.api.receipt.routing")
 
@@ -282,7 +280,7 @@ def _billing_enabled() -> bool:
 
 def _month_start_utc() -> datetime:
     """First instant of the current UTC calendar month, naive (SQLite-safe)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return now.replace(
         day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None
     )
@@ -384,6 +382,20 @@ class EventsRouter:
 
         self._log.info("events.received", extra={"batch_size": len(batch.events)})
 
+        # M2b (multi-tenant security, design 44a3774a §4): attribution is a
+        # verified system property, never self-claimed. Ingest REQUIRES a
+        # credential (bearer token / API key / session cookie); the anonymous
+        # v0 "trust EventIn.user" path is closed. No credential → 401 for the
+        # whole batch, before any DB write.
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=(
+                    "authenticated credential required for ingest: send an "
+                    "Authorization bearer token, X-API-Key, or session cookie"
+                ),
+            )
+
         # Quota paywall (US-V4-1 AC #1). Fires BEFORE any DB writes so a 402
         # leaves no partial state behind. Keyed on the authenticated user when
         # present; falls back to the first event's `user` for v0 trust-body
@@ -434,15 +446,18 @@ class EventsRouter:
                     continue
                 seen_uuids.add(e.entry_uuid)
 
-            effective_user = e.user or current_user
-            if effective_user is None:
+            # M2b: the verified identity wins. A body-supplied `user` that
+            # disagrees with the authenticated identity is tampering, not data
+            # (code-is-law) → 403. A matching or absent `user` is fine.
+            if e.user and e.user != current_user:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_403_FORBIDDEN,
                     detail=(
-                        "user attribution required: provide 'user' in event "
-                        "body or an Authorization bearer token"
+                        "attribution mismatch: event 'user' does not match the "
+                        "authenticated identity"
                     ),
                 )
+            effective_user = current_user
             ts = _naive_utc(e.ts)
             if e.kind is None:
                 e.kind = _infer_kind(e.tool)

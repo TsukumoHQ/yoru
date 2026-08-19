@@ -11,7 +11,7 @@ import os
 # Point receipt DB at a fresh in-memory sqlite BEFORE importing the package.
 os.environ["RECEIPT_DB_URL"] = "sqlite:///:memory:"
 
-from typing import Iterator  # noqa: E402
+from collections.abc import Iterator  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
@@ -93,21 +93,36 @@ def test_metrics_endpoint_content_type_and_200(client: TestClient) -> None:
     assert "charset=utf-8" in ctype
 
 
-def test_events_ingested_counter_increments_on_flagged_write(client: TestClient) -> None:
+def test_events_ingested_counter_increments_on_flagged_write(
+    client: TestClient, engine
+) -> None:
     # `.env` file Write trips the `env_mutation` red flag → per-event flagged=true.
     # EventKind is inferred from tool="Write" → "file_change".
+    # M2b: ingest requires a credential — mint a bearer token; attribution then
+    # comes from it (no body `user`).
+    import hashlib
+    import secrets
+    import uuid
+
+    raw = f"rcpt_{secrets.token_urlsafe(24)}"
+    with Session(engine) as s:
+        s.add(models.HookToken(
+            id=uuid.uuid4().hex, user="met-smoke@test.local",
+            token_hash=hashlib.sha256(raw.encode()).hexdigest(),
+        ))
+        s.commit()
+    headers = {"Authorization": f"Bearer {raw}"}
     payload = {
         "events": [
             {
                 "session_id": "met-smoke-t",
-                "user": "met-smoke@test.local",
                 "tool": "Write",
                 "path": ".env",
                 "content": "K=V",
             }
         ]
     }
-    ingest = client.post("/api/v1/sessions/events", json=payload)
+    ingest = client.post("/api/v1/sessions/events", json=payload, headers=headers)
     assert ingest.status_code == 202, ingest.text
 
     body = client.get("/metrics").text
@@ -206,7 +221,7 @@ def test_metrics_labels_use_route_template_not_raw_path() -> None:
         if ln.startswith("http_requests_total{")
         and any(f'path="/items/{rid}"' in ln for rid in ("abc", "def", "xyz"))
     ]
-    assert not raw_lines, f"raw path labels leaked into metrics:\n" + "\n".join(raw_lines)
+    assert not raw_lines, "raw path labels leaked into metrics:\n" + "\n".join(raw_lines)
 
     # The template line must report count >= 3.
     count = float(template_lines[0].rsplit(" ", 1)[-1])

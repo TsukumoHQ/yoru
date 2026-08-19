@@ -5,7 +5,7 @@ list is scoped to the token's user, detail returns 404 on cross-user.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -14,8 +14,7 @@ from sqlmodel import Session as SQLSession
 from apps.api.api.routers.receipt.models import Event
 from apps.api.api.routers.receipt.models import Session as SessionRow
 
-
-BASE_TS = datetime(2026, 4, 19, 12, 0, 0, tzinfo=timezone.utc)
+BASE_TS = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture()
@@ -391,7 +390,7 @@ def test_session_end_triggers_auto_summary(engine, db_session, mint_token):
             },
         ]
     }
-    ing = c.post("/api/v1/sessions/events", json=batch)
+    ing = c.post("/api/v1/sessions/events", json=batch, headers=h)
     assert ing.status_code == 202
 
     resp = c.get("/api/v1/sessions/ae1/summary", headers=h)

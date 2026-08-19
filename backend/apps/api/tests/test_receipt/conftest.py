@@ -6,12 +6,14 @@ RECEIPT_DB_URL BEFORE the receipt package is imported anywhere.
 from __future__ import annotations
 
 import os
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 
 # Point the receipt DB at in-memory sqlite BEFORE importing the package.
 os.environ["RECEIPT_DB_URL"] = "sqlite:///:memory:"
+
+from datetime import UTC
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -119,13 +121,23 @@ def mint_token(db_session):
         token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         row = HookToken(id=uuid.uuid4().hex, user=user, token_hash=token_hash)
         if revoked:
-            from datetime import datetime, timezone
-            row.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            from datetime import datetime
+            row.revoked_at = datetime.now(UTC).replace(tzinfo=None)
         db_session.add(row)
         db_session.commit()
         return raw, {"Authorization": f"Bearer {raw}"}
 
     return _mint
+
+
+@pytest.fixture()
+def ingest_headers(mint_token):
+    """Ready bearer headers for ingest. M2b (design 44a3774a §4) closed the
+    anonymous ingest path — POST /sessions/events now REQUIRES a credential —
+    so tests that just need to write events (not exercise attribution) attach
+    these. Matches the event-body `user` most tests use so no 403 mismatch."""
+    _raw, headers = mint_token("u-1")
+    return headers
 
 
 @pytest.fixture()
@@ -145,14 +157,14 @@ def session_cookie_for():
     needed — the 401s under test come from the auth dependency, not CSRF.
     """
     import uuid as _uuid
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     import jwt
 
     from apps.api.api.services.auth import local_provider as lp
 
     def _make(email: str = "alice@yoru.test") -> str:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "sub": _uuid.uuid4().hex,
             "email": email,

@@ -8,9 +8,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session as DBSession, select
+from sqlmodel import Session as DBSession
+from sqlmodel import select
 
-from apps.api.api.routers.receipt.models import Event, Session as SessionRow
+from apps.api.api.routers.receipt.models import Event
+from apps.api.api.routers.receipt.models import Session as SessionRow
 
 
 def _event(**overrides: Any) -> dict[str, Any]:
@@ -25,7 +27,7 @@ def _event(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def test_happy_path_batch(client: TestClient, engine) -> None:
+def test_happy_path_batch(client: TestClient, engine, ingest_headers) -> None:
     events = [
         _event(
             session_id="s-1",
@@ -37,7 +39,7 @@ def test_happy_path_batch(client: TestClient, engine) -> None:
         )
         for i in range(10)
     ]
-    resp = client.post("/api/v1/sessions/events", json={"events": events})
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
     assert resp.status_code == 202, resp.text
     body = resp.json()
     assert body["accepted"] == 10
@@ -67,13 +69,13 @@ def test_oversize_batch_returns_422(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
-def test_mixed_session_batch_creates_both(client: TestClient, engine) -> None:
+def test_mixed_session_batch_creates_both(client: TestClient, engine, ingest_headers) -> None:
     events = [
         _event(session_id="s-A", tool="Bash"),
         _event(session_id="s-B", tool="Edit"),
         _event(session_id="s-A", tool="Read"),
     ]
-    resp = client.post("/api/v1/sessions/events", json={"events": events})
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
     assert resp.status_code == 202
     body = resp.json()
     assert body["accepted"] == 3
@@ -87,7 +89,7 @@ def test_mixed_session_batch_creates_both(client: TestClient, engine) -> None:
     assert sb.tools_count == 1
 
 
-def test_flag_propagation_aws_key(client: TestClient, engine) -> None:
+def test_flag_propagation_aws_key(client: TestClient, engine, ingest_headers) -> None:
     events = [
         _event(
             session_id="s-leak",
@@ -96,7 +98,7 @@ def test_flag_propagation_aws_key(client: TestClient, engine) -> None:
             content="export AWS_KEY=AKIAIOSFODNN7EXAMPLE",
         )
     ]
-    resp = client.post("/api/v1/sessions/events", json={"events": events})
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
     assert resp.status_code == 202
     body = resp.json()
     assert body["flagged_sessions"] == ["s-leak"]
@@ -108,13 +110,13 @@ def test_flag_propagation_aws_key(client: TestClient, engine) -> None:
     assert "secret_aws" in sess.flags
 
 
-def test_file_change_aggregates_and_dedupes(client: TestClient, engine) -> None:
+def test_file_change_aggregates_and_dedupes(client: TestClient, engine, ingest_headers) -> None:
     events = [
         _event(session_id="s-f", kind="file_change", tool=None, path="a.py"),
         _event(session_id="s-f", kind="file_change", tool=None, path="a.py"),
         _event(session_id="s-f", kind="file_change", tool=None, path="b.py"),
     ]
-    resp = client.post("/api/v1/sessions/events", json={"events": events})
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
     assert resp.status_code == 202
 
     with DBSession(engine) as s:
@@ -125,13 +127,13 @@ def test_file_change_aggregates_and_dedupes(client: TestClient, engine) -> None:
 
 
 def test_idempotent_session_update_across_requests(
-    client: TestClient, engine
+    client: TestClient, engine, ingest_headers
 ) -> None:
     first = [_event(session_id="s-dup", tool="Bash", tokens_input=5)]
     second = [_event(session_id="s-dup", tool="Edit", tokens_input=7)]
 
-    r1 = client.post("/api/v1/sessions/events", json={"events": first})
-    r2 = client.post("/api/v1/sessions/events", json={"events": second})
+    r1 = client.post("/api/v1/sessions/events", json={"events": first}, headers=ingest_headers)
+    r2 = client.post("/api/v1/sessions/events", json={"events": second}, headers=ingest_headers)
     assert r1.status_code == 202 and r2.status_code == 202
 
     with DBSession(engine) as s:
@@ -170,38 +172,35 @@ def test_user_derived_from_bearer_when_body_user_absent(
     assert sess.user == "alice@example.com"
 
 
-def test_user_absent_and_no_bearer_is_rejected(client: TestClient) -> None:
-    """Event without body.user AND no bearer → 422 (no way to attribute)."""
+def test_ingest_without_credential_is_rejected_401(client: TestClient) -> None:
+    """M2b (design 44a3774a §4): the anonymous v0 path is closed — ingest with
+    no credential (no bearer / API key / cookie) is 401, even if body.user is
+    set. Attribution is a verified system property, never self-claimed."""
     event = {
         "session_id": "s-noone",
+        "user": "self-claimed@evil.dev",
         "kind": "tool_use",
         "tool": "Edit",
         "content": "noop",
     }
     resp = client.post("/api/v1/sessions/events", json={"events": [event]})
-    assert resp.status_code == 422, resp.text
-    assert "user" in resp.text.lower()
+    assert resp.status_code == 401, resp.text
 
 
-def test_body_user_wins_over_bearer(
+def test_body_user_mismatching_bearer_is_rejected_403(
     client: TestClient, engine, mint_token
 ) -> None:
-    """v0 contract: body.user is trusted when set, even alongside a bearer.
-
-    Preserves scripts/smoke-us14.sh behavior; tightening to bearer-always is
-    a v1 concern (see USER_STORIES §US-20 org-scoping).
-    """
+    """M2b: a body.user that disagrees with the authenticated identity is
+    tampering, not data → 403. (Reverses the v0 'body wins' behavior.)"""
     _, headers = mint_token("alice@example.com")
     resp = client.post(
         "/api/v1/sessions/events",
         json={"events": [_event(session_id="s-both", user="bob@example.com")]},
         headers=headers,
     )
-    assert resp.status_code == 202, resp.text
+    assert resp.status_code == 403, resp.text
     with DBSession(engine) as s:
-        sess = s.get(SessionRow, "s-both")
-    assert sess is not None
-    assert sess.user == "bob@example.com"
+        assert s.get(SessionRow, "s-both") is None  # nothing written on reject
 
 
 # ---------- kind classifier (gap-3 fix) ----------
@@ -238,7 +237,7 @@ def test_kind_inferred_as_file_change_for_write_toolname(
 
 
 def test_session_start_creates_row_without_tool_counts(
-    client: TestClient, engine
+    client: TestClient, engine, ingest_headers
 ) -> None:
     """session_start event creates a session row with tools_count=0, files_count=0."""
     ts = "2026-04-20T10:00:00+00:00"
@@ -250,7 +249,7 @@ def test_session_start_creates_row_without_tool_counts(
             "ts": ts,
         }
     ]
-    resp = client.post("/api/v1/sessions/events", json={"events": events})
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
     assert resp.status_code == 202, resp.text
 
     with DBSession(engine) as s:
@@ -263,7 +262,7 @@ def test_session_start_creates_row_without_tool_counts(
     assert sess.started_at == expected
 
 
-def test_session_end_updates_ended_at(client: TestClient, engine) -> None:
+def test_session_end_updates_ended_at(client: TestClient, engine, ingest_headers) -> None:
     """session_end event updates ended_at without incrementing tools/files counts."""
     start_ts = "2026-04-20T10:00:00+00:00"
     end_ts = "2026-04-20T10:05:00+00:00"
@@ -281,7 +280,7 @@ def test_session_end_updates_ended_at(client: TestClient, engine) -> None:
             "ts": end_ts,
         },
     ]
-    resp = client.post("/api/v1/sessions/events", json={"events": events})
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
     assert resp.status_code == 202, resp.text
 
     with DBSession(engine) as s:
