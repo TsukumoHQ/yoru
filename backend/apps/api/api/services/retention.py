@@ -6,11 +6,37 @@ records-retention policy. ``RETENTION_DAYS=0`` keeps everything.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from sqlalchemy import text
 
 from apps.api.api.routers.receipt.db import engine
+
+
+def retention_days() -> int:
+    """Configured retention window in days. ``RETENTION_DAYS=0`` (default) means
+    keep forever. S2 records an expiry from this; S5 will add the >=6mo
+    compliance floor + enforcement on top of the same knob."""
+    try:
+        return int(os.environ.get("RETENTION_DAYS", "0"))
+    except ValueError:
+        return 0
+
+
+def retention_expires_at(ts: datetime, days: Optional[int] = None) -> Optional[datetime]:
+    """Naive-UTC instant at which an event/session recorded at ``ts`` becomes
+    retention-eligible, or None when retention is disabled (keep forever).
+
+    Pure + policy-driven so ingest can stamp ``retention_expires_at`` per record
+    without any scheduler. ``ts`` is stored naive-UTC; the return matches.
+    """
+    d = retention_days() if days is None else days
+    if d <= 0:
+        return None
+    base = ts if ts.tzinfo is None else ts.astimezone(timezone.utc).replace(tzinfo=None)
+    return base + timedelta(days=d)
 
 
 def prune_older_than(days: int) -> dict:

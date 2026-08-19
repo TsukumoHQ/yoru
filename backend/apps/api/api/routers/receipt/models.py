@@ -64,6 +64,11 @@ class Session(SQLModel, table=True):
     # starts private. Flipped by POST /sessions/{id}/share. Gates read
     # access on GET /public/sessions/{id} (unauth, redacted).
     is_public: bool = Field(default=False, index=True)
+    # Compliance retention (S2, design trovex:28547568 §3). UTC instant past
+    # which this session is eligible for retention action. Recomputed at each
+    # ingest from started_at + instance policy (started_at can move back on
+    # backfill). NULL = keep forever. S5 adds the >=6mo floor + enforcement.
+    retention_expires_at: Optional[datetime] = Field(default=None)
 
 
 class Event(SQLModel, table=True):
@@ -99,6 +104,37 @@ class Event(SQLModel, table=True):
     # skips an (session_id, entry_uuid) it already has — so events survive
     # backend downtime without ever double-inserting.
     entry_uuid: Optional[str] = Field(default=None, index=True)
+    # Compliance retention (S2, design trovex:28547568 §3). UTC instant past
+    # which this event is eligible for retention action (S5 enforces; here it's
+    # recorded at ingest from instance policy). NULL = keep forever
+    # (RETENTION_DAYS=0). Additive column; absent on pre-S2 rows.
+    retention_expires_at: Optional[datetime] = Field(default=None)
+
+
+class EventFlag(SQLModel, table=True):
+    """First-class red-flag record (S2, design trovex:28547568 §6).
+
+    Red flags were only ever a JSON string array on ``events.flags`` /
+    ``sessions.flags`` — fine for display, but not queryable as a risk log
+    (AI Act Art.12(2) risk-ID + monitoring; NIST AI RMF risk log). This
+    promotes each triggered rule to a row so an auditor can query
+    "every db_destructive across the fleet in Q3" without unpacking JSON.
+
+    Written at ingest ALONGSIDE the JSON arrays (both kept in sync); the JSON
+    stays the read-perf/back-compat path, this is the queryable index. One row
+    per (event, rule_id). ``category`` is the load-bearing six-kind taxonomy
+    (secret · shell · db · env · migration · ci); ``severity`` is the coarse
+    audit tier derived from that category.
+    """
+    __tablename__ = "event_flags"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: str = Field(index=True, foreign_key="sessions.id")
+    event_id: Optional[int] = Field(default=None, index=True, foreign_key="events.id")
+    rule_id: str = Field(index=True)
+    category: str = Field(index=True)   # one of the six user-facing kinds
+    severity: str = Field(index=True)   # critical | high | medium
+    ts: datetime = Field(default_factory=_utcnow, index=True)
 
 
 class CliToken(SQLModel, table=True):

@@ -73,6 +73,9 @@ def init_db() -> None:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sessions_git_remote ON sessions(git_remote)"))
         if "git_branch" not in cols:
             conn.execute(text("ALTER TABLE sessions ADD COLUMN git_branch TEXT"))
+        # S2 (design trovex:28547568 §3): compliance retention expiry.
+        if "retention_expires_at" not in cols:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN retention_expires_at TIMESTAMP"))
 
         # Phase W1: backfill workspace_id from the old org_id → new workspace_id
         # mapping stored on organizations.settings->'migration_workspace_id'.
@@ -100,6 +103,11 @@ def init_db() -> None:
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_events_entry_uuid ON events(entry_uuid)"
             ))
+        # S2 (design trovex:28547568 §3): compliance retention expiry. The
+        # event_flags table itself is created by create_all above (new model);
+        # only these additive columns need a hand-applied ALTER on live rows.
+        if "retention_expires_at" not in ev_cols:
+            conn.execute(text("ALTER TABLE events ADD COLUMN retention_expires_at TIMESTAMP"))
 
         # Phase B migration: hook_tokens → cli_tokens + type split. Idempotent.
         has_cli = conn.execute(text(

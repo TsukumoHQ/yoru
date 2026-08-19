@@ -47,13 +47,15 @@ from .db import get_session
 from .deps import get_current_user
 from .models import (
     Event,
+    EventFlag,
     EventKind,
     EventsBatchIn,
     IngestAck,
     Session as SessionRow,
 )
 from .pricing import compute_cost_usd, summarize_tokens
-from .red_flags import scan_event
+from .red_flags import category_of, scan_event, severity_of
+from apps.api.api.services.retention import retention_expires_at as _retention_expires_at
 from .summary_router import _build_summary
 
 
@@ -479,6 +481,11 @@ class EventsRouter:
             if sess.ended_at is None or ts > sess.ended_at:
                 sess.ended_at = ts
 
+            # Compliance retention (S2). Stamp the session's expiry from its
+            # (possibly-backfilled) start + policy; recomputed each event so a
+            # later earlier-ts backfill moves the expiry back with started_at.
+            sess.retention_expires_at = _retention_expires_at(sess.started_at)
+
             if flags:
                 merged = list(sess.flags)
                 for f in flags:
@@ -521,11 +528,25 @@ class EventsRouter:
                 prev_hash=prev_hash,
                 entry_hash=entry_hash,
                 entry_uuid=e.entry_uuid,
+                retention_expires_at=_retention_expires_at(ts),
             )
             session.add(ev_row)
-            if flags and e.session_id not in first_flagged_event_id:
-                session.flush()  # assign id
-                if ev_row.id is not None:
+            # First-class red-flag records (S2). Written ALONGSIDE the JSON
+            # arrays (kept in sync) so the risk log is queryable without
+            # unpacking JSON. Needs the event id, so flush when flags exist —
+            # this also assigns the first-flagged-event id below.
+            if flags:
+                session.flush()  # assign ev_row.id
+                for rule_id in flags:
+                    session.add(EventFlag(
+                        session_id=e.session_id,
+                        event_id=ev_row.id,
+                        rule_id=rule_id,
+                        category=category_of(rule_id),
+                        severity=severity_of(rule_id),
+                        ts=ts,
+                    ))
+                if e.session_id not in first_flagged_event_id and ev_row.id is not None:
                     first_flagged_event_id[e.session_id] = ev_row.id
             receipt_events_ingested_total.labels(
                 kind=e.kind or "unknown",

@@ -109,6 +109,54 @@ _CI_CONFIG_RES: tuple[re.Pattern[str], ...] = (
 )
 
 
+# ── six-kind taxonomy + severity (S2, design trovex:28547568 §6) ─────────────
+# The canonical rule_id -> user-facing category map. Six kinds, load-bearing
+# (mirrored by the dashboard's normalizeFlag + marketing). This is the backend
+# source of truth; anything consuming rule_ids maps THROUGH here so the two
+# lists never drift. Do NOT add a seventh kind here — the brief's velocity /
+# prompt-injection / scope / failure-masking rules are a SEPARATE future
+# ruleset, not folded into the six.
+_CATEGORY_SEVERITY: dict[str, str] = {
+    "secret": "critical",
+    "db": "critical",
+    "shell": "high",
+    "ci": "high",
+    "env": "medium",
+    "migration": "medium",
+}
+
+
+def category_of(rule_id: str) -> str:
+    """Map a stable rule_id to one of the six user-facing categories.
+
+    secret_* -> secret; shell_* -> shell; db_destructive -> db;
+    migration_file -> migration; env_mutation -> env; ci_config -> ci.
+    An unrecognized id falls back to "secret" only if it is secret-prefixed,
+    else "shell" is never assumed — unknown ids return "other" so a taxonomy
+    drift surfaces instead of silently miscategorizing.
+    """
+    if rule_id.startswith("secret_"):
+        return "secret"
+    if rule_id.startswith("shell_"):
+        return "shell"
+    if rule_id == "db_destructive":
+        return "db"
+    if rule_id == "migration_file":
+        return "migration"
+    if rule_id == "env_mutation":
+        return "env"
+    if rule_id == "ci_config":
+        return "ci"
+    return "other"
+
+
+def severity_of(rule_id: str) -> str:
+    """Coarse audit severity (critical | high | medium) for a rule_id, derived
+    from its category. Unknown categories default to "high" so an
+    unclassified signal is never quietly downgraded."""
+    return _CATEGORY_SEVERITY.get(category_of(rule_id), "high")
+
+
 def scan_event(e: "EventIn") -> list[str]:
     """Return a deduped list of rule ids triggered by ``e``.
 
