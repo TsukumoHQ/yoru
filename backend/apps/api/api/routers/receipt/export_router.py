@@ -174,7 +174,13 @@ class ExportRouter:
                 export_cap=_EXPORT_CAP,
                 predicate_type=dsse.PREDICATE_TYPE,
             )
-            bundle = {**statement, **dsse.build_envelope(statement, key)}
+            # The signed DSSE payload is the SOLE source of truth: emit ONLY the
+            # envelope (dsse + embedded public key), never a second, UNSIGNED
+            # copy of the statement at top level — a consumer reading an unsigned
+            # mirror could be fed divergent data (review-8d4a903c). Readers get
+            # the content by decoding dsse.payload (what `yoru verify-export`
+            # does after checking the signature).
+            bundle = dsse.build_envelope(statement, key)
             headers["Content-Disposition"] = (
                 f'attachment; filename="yoru-audit-export-{stamp}.eu-ai-act.json"'
             )

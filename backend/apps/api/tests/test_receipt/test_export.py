@@ -8,6 +8,7 @@ Covers the task-brief acceptance criteria:
 """
 from __future__ import annotations
 
+import base64
 import csv
 import io
 import json
@@ -201,8 +202,12 @@ def test_export_eu_ai_act_signed_bundle(
     assert dsse.verify_envelope(bundle) is True
     assert bundle["ed25519"]["public_key"]
     assert bundle["dsse"]["payloadType"] == dsse.DSSE_PAYLOAD_TYPE
+    # The signed DSSE payload is the SOLE source of truth — the bundle carries
+    # NO unsigned top-level statement copy (review-8d4a903c follow-up).
+    assert "predicate" not in bundle
+    signed = json.loads(base64.b64decode(bundle["dsse"]["payload"]))
 
-    pred = bundle["predicate"]
+    pred = signed["predicate"]
     assert pred["session_count"] == 1  # alice only, bob excluded
     s = pred["sessions"][0]
     assert s["session_id"] == "a1"
