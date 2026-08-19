@@ -92,9 +92,9 @@ function mermaidLabel(text: string): string {
   return clip(text.replace(/["[\]{}()|<>#]/g, ""), 48) || "step"
 }
 
-function buildMermaid(steps: Step[]): { src: string; truncated: number } {
+function buildMermaid(steps: Step[], totalSteps: number): { src: string; truncated: number } {
   const shown = steps.slice(0, GRAPH_CAP)
-  const truncated = steps.length - shown.length
+  const truncated = totalSteps - shown.length
   const lines: string[] = ["flowchart TD", '    start(["session start"])']
   let prev = "start"
   shown.forEach((s, i) => {
@@ -113,10 +113,13 @@ function buildMermaid(steps: Step[]): { src: string; truncated: number } {
 }
 
 export function CausalReplay({ events }: { events: SessionEvent[] }) {
-  const steps = useMemo(() => buildSteps(events), [events])
-  const visible = useMemo(() => steps.slice(0, RENDER_CAP), [steps])
-  const hiddenSteps = steps.length - visible.length
-  const { src, truncated } = useMemo(() => buildMermaid(steps), [steps])
+  const total = events.length
+  // Describe + redact ONLY the steps we actually render/graph (RENDER_CAP ≥
+  // GRAPH_CAP). A session can hold 10^5 events; redacting every one at load
+  // would freeze the main thread for a view that shows the first RENDER_CAP.
+  const steps = useMemo(() => buildSteps(events.slice(0, RENDER_CAP)), [events])
+  const hiddenSteps = total - steps.length
+  const { src, truncated } = useMemo(() => buildMermaid(steps, total), [steps, total])
   const [copied, setCopied] = useState(false)
   const [showGraph, setShowGraph] = useState(false)
 
@@ -146,13 +149,13 @@ export function CausalReplay({ events }: { events: SessionEvent[] }) {
           Plain-English replay
         </h2>
         <p className="mt-1 text-caption text-ink-muted">
-          The run as steps, derived from the recorded order. {steps.length} step
-          {steps.length === 1 ? "" : "s"}.
+          The run as steps, derived from the recorded order. {total} step
+          {total === 1 ? "" : "s"}.
         </p>
       </div>
 
       <ol className="divide-y divide-rule">
-        {visible.map((s, i) => (
+        {steps.map((s, i) => (
           <li key={s.key} id={`step-${s.key}`} className="flex gap-3 px-4 py-2.5">
             <span className="mt-0.5 shrink-0 font-mono text-micro tabular-nums text-ink-faint">
               {String(i + 1).padStart(2, "0")}
@@ -178,7 +181,7 @@ export function CausalReplay({ events }: { events: SessionEvent[] }) {
 
       {hiddenSteps > 0 && (
         <p className="border-t border-rule px-4 py-2.5 text-caption text-ink-faint">
-          Showing the first {RENDER_CAP} of {steps.length} steps. The full stream is in
+          Showing the first {RENDER_CAP} of {total} steps. The full stream is in
           the timeline below.
         </p>
       )}
