@@ -116,6 +116,25 @@ def init_db() -> None:
         if "content_digest" not in ev_cols:
             conn.execute(text("ALTER TABLE events ADD COLUMN content_digest TEXT"))
 
+        # Multi-tenant tenant key (design 44a3774a §2 / M1). Add `org_id` to the
+        # three audit tables + index each, then backfill legacy un-scoped rows to
+        # the default org exactly once. Additive + idempotent.
+        #
+        # NB: the sessions index MUST be (re)created here — AFTER the
+        # `DROP INDEX IF EXISTS ix_sessions_org_id` cleanup above (that drop is
+        # leftover from the historic org_id→workspace_id RENAME and runs every
+        # boot). Creating it here means it survives; the org_id model fields
+        # intentionally omit index=True for the same reason.
+        for _tbl in ("sessions", "events", "event_flags"):
+            _rows = conn.execute(text(f"PRAGMA table_info({_tbl})")).fetchall()
+            _tcols = {r[1] for r in _rows}
+            if "org_id" not in _tcols:
+                conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN org_id TEXT"))
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS ix_{_tbl}_org_id ON {_tbl}(org_id)"
+            ))
+        _run_orgid_backfill_once(conn)
+
         # Phase B migration: hook_tokens → cli_tokens + type split. Idempotent.
         has_cli = conn.execute(text(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='cli_tokens'"
@@ -240,4 +259,41 @@ def _run_workspace_id_backfill_once(conn) -> None:
 
     conn.execute(sql_text(
         "INSERT OR REPLACE INTO _schema_markers (key, value) VALUES ('_workspace_backfill_done', '1')"
+    ))
+
+
+def _run_orgid_backfill_once(conn) -> None:
+    """Backfill the multi-tenant `org_id` onto legacy un-scoped audit rows.
+
+    Every session/event/event_flag written before multi-tenant (M1) has a NULL
+    org_id. Assign them all to the default org (``DEFAULT_ORG_ID`` — the
+    studio's own / legacy org, design 44a3774a §2). New writes stamp org_id from
+    the acting dev's org-bound token at ingest (M2), so this only ever touches
+    pre-M1 rows.
+
+    Idempotent: a done-marker makes a second boot a no-op. Purely local
+    (no network), unlike the workspace backfill.
+    """
+    from sqlalchemy import text as sql_text
+
+    from .models import DEFAULT_ORG_ID
+
+    conn.execute(sql_text(
+        "CREATE TABLE IF NOT EXISTS _schema_markers "
+        "(key TEXT PRIMARY KEY, value TEXT, ts TEXT DEFAULT CURRENT_TIMESTAMP)"
+    ))
+    done = conn.execute(sql_text(
+        "SELECT value FROM _schema_markers WHERE key = '_orgid_backfill_done'"
+    )).first()
+    if done and done[0] == "1":
+        return
+
+    for _tbl in ("sessions", "events", "event_flags"):
+        conn.execute(
+            sql_text(f"UPDATE {_tbl} SET org_id = :org WHERE org_id IS NULL"),
+            {"org": DEFAULT_ORG_ID},
+        )
+
+    conn.execute(sql_text(
+        "INSERT OR REPLACE INTO _schema_markers (key, value) VALUES ('_orgid_backfill_done', '1')"
     ))

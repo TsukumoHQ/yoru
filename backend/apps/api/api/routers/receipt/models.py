@@ -26,6 +26,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Sentinel tenant key for pre-multi-tenant (legacy) audit rows — the studio's
+# own / default org. Backfilled onto every un-scoped session/event/flag by the
+# M1 migration (design 44a3774a §2). Real client-orgs carry their
+# organizations.id UUID; this readable sentinel keeps legacy rows visibly
+# distinct from a real client-org so they're never mistaken for one.
+DEFAULT_ORG_ID = "default-org"
+
+
 # ---------- Tables ----------
 
 class Session(SQLModel, table=True):
@@ -34,6 +42,17 @@ class Session(SQLModel, table=True):
 
     id: str = Field(primary_key=True)
     user: str = Field(index=True)
+    # Multi-tenant tenant key (design 44a3774a §2 / M1). The client-org this
+    # session belongs to — one yoru instance hosts N isolated client-orgs. Set
+    # at ingest from the acting dev's org-bound token (M2), never self-claimed.
+    # A session belongs to exactly ONE org, so the per-session hash-chain stays
+    # sound per-org (org_id is scoping metadata, not part of canonical(event)).
+    # NULL only on legacy pre-multi-tenant rows until backfilled to the default
+    # org. NB: the name `org_id` was historically a *routing* column renamed to
+    # `workspace_id` (see db.py) — this is the distinct TENANT key. The index is
+    # managed in db.init_db (must be re-created after db.py's DROP INDEX
+    # ix_sessions_org_id cleanup), so no index=True here.
+    org_id: Optional[str] = Field(default=None)
     agent: str = Field(default="claude-code")
     started_at: datetime = Field(default_factory=_utcnow, index=True)
     ended_at: Optional[datetime] = Field(default=None)
@@ -77,6 +96,11 @@ class Event(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: str = Field(index=True, foreign_key="sessions.id")
+    # Multi-tenant tenant key (M1) — denormalized from the parent session (a
+    # session is single-org) so per-org red-flag/retention scans don't join.
+    # Index managed in db.init_db (idempotent, covers the ALTER-added column on
+    # existing DBs where create_all won't add it).
+    org_id: Optional[str] = Field(default=None)
     ts: datetime = Field(default_factory=_utcnow, index=True)
     kind: str = Field(index=True)
     tool: Optional[str] = None
@@ -147,6 +171,9 @@ class EventFlag(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: str = Field(index=True, foreign_key="sessions.id")
     event_id: Optional[int] = Field(default=None, index=True, foreign_key="events.id")
+    # Multi-tenant tenant key (M1) — denormalized from the parent session so an
+    # auditor can query the per-org risk log without a join. Index in db.init_db.
+    org_id: Optional[str] = Field(default=None)
     rule_id: str = Field(index=True)
     category: str = Field(index=True)   # one of the six user-facing kinds
     severity: str = Field(index=True)   # critical | high | medium
