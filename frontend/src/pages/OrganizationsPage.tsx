@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { apiFetch, ApiError } from "../lib/api"
+import { apiFetch, ApiError, downloadOrgAuditExport } from "../lib/api"
 import { useInstanceConfig } from "../lib/config"
 import { toast } from "../components/Toaster"
 
@@ -440,6 +440,25 @@ function OrgList({
 
 function OrgDetail({ org, canInvite, onDeleted }: { org: Organization; canInvite: boolean; onDeleted: () => void }) {
   const qc = useQueryClient()
+  const [exporting, setExporting] = useState(false)
+
+  async function onExport() {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const { truncated } = await downloadOrgAuditExport(org.id)
+      toast.success(
+        "Audit bundle exported",
+        truncated
+          ? "Capped at 10,000 sessions — narrow the date range for the rest."
+          : "Signed EU AI Act bundle downloaded.",
+      )
+    } catch (err) {
+      toast.error("Export failed", err instanceof Error ? err.message : String(err))
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const { data: members = [] } = useQuery({
     queryKey: membersKey(org.id),
@@ -487,22 +506,33 @@ function OrgDetail({ org, canInvite, onDeleted }: { org: Organization; canInvite
               slug: {org.slug} · id: {org.id.slice(0, 8)}…
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (
-                confirm(
-                  `Delete "${org.name}"? This soft-deletes (30-day recovery).`,
-                )
-              ) {
-                delM.mutate()
-              }
-            }}
-            disabled={delM.isPending}
-            className="shrink-0 rounded-sm border border-flag-env/60 px-3 py-1.5 font-mono text-caption text-flag-env-fg hover:bg-flag-env/10 disabled:opacity-60"
-          >
-            Delete org
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { void onExport() }}
+              disabled={exporting}
+              title="Download a signed EU AI Act audit bundle for this organization"
+              className="rounded-sm border border-rule px-3 py-1.5 font-mono text-caption text-ink hover:bg-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 disabled:opacity-60"
+            >
+              {exporting ? "Exporting…" : "Export audit bundle"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  confirm(
+                    `Delete "${org.name}"? This soft-deletes (30-day recovery).`,
+                  )
+                ) {
+                  delM.mutate()
+                }
+              }}
+              disabled={delM.isPending}
+              className="rounded-sm border border-flag-env/60 px-3 py-1.5 font-mono text-caption text-flag-env-fg hover:bg-flag-env/10 disabled:opacity-60"
+            >
+              Delete org
+            </button>
+          </div>
         </div>
       </div>
 

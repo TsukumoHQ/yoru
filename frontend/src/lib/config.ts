@@ -43,12 +43,17 @@ export function useInstanceConfig(): InstanceConfig {
 // for this, or they'll act on the placeholder during the initial-load window.
 // Shares the same query cache key, so it adds no extra request.
 export function useInstanceConfigResolved(): boolean {
-  const { isSuccess, isError } = useQuery({
+  const { isSuccess } = useQuery({
     queryKey: ["instance", "config"],
     queryFn: getInstanceConfig,
     staleTime: 5 * 60_000,
     retry: 0,
     placeholderData: DEFAULT_CONFIG,
   })
-  return isSuccess || isError
+  // Only a genuine /config response counts as resolved. A transient network
+  // error still serves the single_org=true placeholder, so treating isError as
+  // resolved would let a reload blip wipe a super-admin's persisted org
+  // selection (review-yoru-mt-orgscope-signout notice). Fail toward "not yet
+  // known" instead — the selection survives the blip and self-heals on refetch.
+  return isSuccess
 }

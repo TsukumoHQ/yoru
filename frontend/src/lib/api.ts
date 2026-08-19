@@ -1006,3 +1006,64 @@ export async function listOrganizations(): Promise<OrgSummary[]> {
   const items = Array.isArray(r) ? r : r.items
   return (items ?? []).map((o) => ({ id: o.id, name: o.name }))
 }
+
+// ---- Per-org signed EU AI Act audit export (multi-tenant M5) ----
+// The billable, per-tenant evidence pack: one signed DSSE bundle of the org's
+// sessions/events/chains. Server sets Content-Disposition (attachment) so the
+// browser saves it; we fetch-with-cookie instead of a bare link so the error
+// states surface as toasts rather than a raw error page. Super-admin exports any
+// org; a member only their own (cross-org → 404, indistinguishable).
+
+/** Pull the filename the server chose from Content-Disposition (best-effort;
+ *  requires the header to be CORS-exposed cross-origin, else we fall back). */
+function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null
+  const star = header.match(/filename\*=(?:UTF-8'')?"?([^;"]+)"?/i)
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1])
+    } catch {
+      return star[1]
+    }
+  }
+  const plain = header.match(/filename="?([^;"]+)"?/i)
+  return plain?.[1] ?? null
+}
+
+/** Trigger a browser download of an org's signed EU AI Act audit bundle.
+ *  Returns whether the server capped the export (10k sessions). Throws a typed
+ *  ApiError on 401 / 404 / 409 so the caller can toast the right message. */
+export async function downloadOrgAuditExport(
+  orgId: string,
+): Promise<{ truncated: boolean }> {
+  const res = await fetch(
+    `${API_BASE}/orgs/${encodeURIComponent(orgId)}/audit-export`,
+    { credentials: "include" },
+  )
+  if (!res.ok) {
+    if (res.status === 401) throw new ApiError(401, "You're not signed in.")
+    if (res.status === 404)
+      throw new ApiError(404, "No such organization, or nothing to export.")
+    if (res.status === 409)
+      throw new ApiError(
+        409,
+        "Export signing isn't configured on this server (YORU_SIGNING_KEY unset).",
+      )
+    const body = await res.text().catch(() => "")
+    throw new ApiError(res.status, body || `Export failed (${res.status})`)
+  }
+  const truncated = res.headers.get("X-Truncated") === "true"
+  const filename =
+    filenameFromDisposition(res.headers.get("Content-Disposition")) ??
+    `yoru-audit-export-${orgId}.eu-ai-act.json`
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+  return { truncated }
+}
