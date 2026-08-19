@@ -8,6 +8,7 @@ import { SessionReplay } from "@receipt/ui"
 import { SessionHero } from "../features/sessions/SessionHero"
 import { FileChangedRail } from "../features/sessions/FileChangedRail"
 import { CostSparkline } from "../features/sessions/CostSparkline"
+import { CausalReplay } from "../features/sessions/CausalReplay"
 import { Timeline } from "../features/sessions/Timeline"
 
 export function SessionDetailPage() {
@@ -68,6 +69,10 @@ function Receipt({ session }: { session: SessionDetail }) {
         <SessionHero session={session} />
         <CostPanel session={session} />
         <IntegrityBadge sessionId={session.id} />
+        {/* Steal #4 — the run as plain-English causal steps + a copyable run
+            graph, for a compliance officer reading the trail (not a flat log).
+            Derived from the recorded event order; reads only loaded events. */}
+        <CausalReplay events={session.events ?? []} />
         {/* TSU-55 follow-up — live step-through replay (authed dashboard only;
             owner-side, not the dormant public viewer). Renders above the full
             timeline so you can scrub the run, then read the detail below. */}
