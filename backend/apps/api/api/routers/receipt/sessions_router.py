@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import case, func, or_
 from sqlmodel import Session as SQLSession, select
 
@@ -50,8 +50,18 @@ def _session_visible(row, current_user: str) -> bool:
     """
     if row is None:
         return False
-    from apps.api.api.services.access.visibility import visible_emails_sync
-    visible = visible_emails_sync(current_user)
+    # M3: tenant wall first — the row's org must be in the caller's org set
+    # (None = super-admin, all orgs). A NULL org_id (legacy/pre-M1 row) counts
+    # as the default org. Then the within-org email/group check.
+    from apps.api.api.services.access.visibility import (
+        _DEFAULT_ORG_ID,
+        visible_scope_sync,
+    )
+    visible, orgs = visible_scope_sync(current_user)
+    if orgs is not None:
+        row_org = getattr(row, "org_id", None) or _DEFAULT_ORG_ID
+        if row_org not in orgs:
+            return False
     return visible is None or row.user in visible
 
 # Tool-name classes for path/content extraction (v1 timeline enrichment).
@@ -367,11 +377,23 @@ class SessionsRouter:
         offset: int = Query(0, ge=0),
         db: SQLSession = Depends(get_session),
         current_user: str = Depends(require_current_user),
+        x_organization_id: Optional[str] = Header(None, alias="X-Organization-Id"),
     ) -> SessionListResponse:
-        # Group-scoped visibility: own + group-mates' sessions; admin sees all.
-        from apps.api.api.services.access.visibility import visible_emails_sync
-        visible = visible_emails_sync(current_user)
+        # M3 (design 44a3774a §3): tenant wall by org_id + within-org email/group
+        # visibility. A super-admin (visible_org_ids None) sees all orgs, or the
+        # one named by a valid X-Organization-Id; a member is walled to their org.
+        from apps.api.api.services.access.visibility import (
+            _DEFAULT_ORG_ID,
+            visible_scope_sync,
+        )
+        visible, orgs = visible_scope_sync(current_user, x_organization_id)
         filters = [] if visible is None else [SessionRow.user.in_(visible)]
+        if orgs is not None:
+            # NULL org_id (legacy/pre-M1 rows) counts as the default org.
+            org_clause = SessionRow.org_id.in_(orgs)
+            if _DEFAULT_ORG_ID in orgs:
+                org_clause = or_(org_clause, SessionRow.org_id.is_(None))
+            filters.append(org_clause)
         if from_ts is not None:
             filters.append(SessionRow.started_at >= from_ts)
         if to_ts is not None:

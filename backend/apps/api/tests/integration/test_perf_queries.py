@@ -104,6 +104,13 @@ def _stub_visibility(monkeypatch):
         "apps.api.api.services.access.visibility.visible_emails_sync",
         lambda caller_email: {PERF_USER},
     )
+    # M3: the list path now resolves email + org scope in one call. Stub it to
+    # the perf user's own emails + no org restriction (orgs=None) so no data
+    # store round-trip and the N+1 count stays deterministic.
+    monkeypatch.setattr(
+        "apps.api.api.services.access.visibility.visible_scope_sync",
+        lambda caller_email, org_header=None: ({PERF_USER}, None),
+    )
 
 
 class _QueryCounter:

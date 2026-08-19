@@ -437,6 +437,9 @@ class SessionListItem(SQLModel):
     flagged: bool
     flags: list[str]
     title: Optional[str] = None
+    # Multi-tenant tenant key (M3) — surfaced so the dashboard renders the org
+    # badge + guards cross-org in the UI (design 44a3774a §3; contract seam #4).
+    org_id: Optional[str] = None
     workspace_id: Optional[str] = None
     # VCS provider slug (github|gitlab|bitbucket|azure) derived from the
     # session's git_remote — the provider only, NEVER the owner/repo (that would

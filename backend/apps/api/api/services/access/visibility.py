@@ -94,3 +94,101 @@ async def can_access_owner(user_id: UUID, owner_user_id: str | None) -> bool:
     if allowed is None:
         return True
     return owner_user_id is not None and str(owner_user_id) in allowed
+
+
+# ── Multi-tenant org scoping (M3, design 44a3774a §3) ───────────────────────
+# The audit tables carry org_id (M1/M2). Reads are walled by tenant: a caller
+# sees ONLY sessions whose org_id is in their org set, on TOP of the existing
+# within-org email/group visibility above. This is the cross-tenant boundary
+# that makes one instance safely host N client-orgs.
+#
+# NOTE (deferred): per-org owner/admin "sees the whole org" is NOT yet wired —
+# a regular member still sees own+group within the org. The studio super-admin
+# (profiles.role=='admin') sees all orgs / the selected one. Per-org-admin
+# widening is a documented follow-up.
+
+# Sentinel org for legacy/unscoped rows — kept in sync with receipt.models.
+_DEFAULT_ORG_ID = "default-org"
+
+
+def visible_scope_sync(
+    caller_email: str | None, org_header: str | None = None
+) -> tuple[set[str] | None, set[str] | None]:
+    """Resolve BOTH the email-visibility and the org-visibility from a SINGLE
+    ``profiles`` lookup (perf: the list path is query-count-budgeted).
+
+    Returns ``(emails, orgs)`` — each ``None`` meaning "no restriction"
+    (super-admin). Mirrors ``visible_emails_sync`` + ``visible_org_ids_sync``
+    exactly, just without the duplicate profile query. Use this on the hot
+    read path; the two single-purpose helpers stay for other callers.
+    """
+    if not caller_email:
+        return {caller_email} if caller_email else set(), {_DEFAULT_ORG_ID}
+    store = get_data_store()
+    profs = store.query_records("profiles", filters={"email": caller_email})
+    prof = profs[0] if profs else None
+
+    if prof and prof.get("role") == "admin":
+        # Super-admin: all emails; all orgs (or a validly-owned selected org).
+        orgs: set[str] | None = None
+        if org_header and _is_org_member(store, str(prof["id"]), org_header):
+            orgs = {org_header}
+        return None, orgs
+
+    if not prof:
+        # CLI-only / no-profile identity → owner-only + default org.
+        return {caller_email}, {_DEFAULT_ORG_ID}
+
+    # Regular member: own + group-mates' emails; their org memberships.
+    owner_ids = _co_member_user_ids(store, str(prof["id"]))
+    emails: set[str] = {caller_email}
+    for uid in owner_ids:
+        p = store.get_record("profiles", uid)
+        if p and p.get("email"):
+            emails.add(p["email"])
+    org_ids = _member_org_ids(store, str(prof["id"])) or {_DEFAULT_ORG_ID}
+    return emails, org_ids
+
+
+def visible_org_ids_sync(
+    caller_email: str | None, org_header: str | None = None
+) -> set[str] | None:
+    """Org ids the caller may read (the tenant wall). None = super-admin, all
+    orgs (or the single org named by a valid ``X-Organization-Id``).
+
+    - super-admin (profiles.role=='admin'): None (all orgs). If ``org_header``
+      is given AND the admin is a member of it, narrow to ``{org_header}``.
+    - regular caller: their org_ids from ``organization_members`` (joined via
+      profile id). A caller with NO membership row (legacy single-org deploy,
+      or a CLI-only identity) falls back to ``{_DEFAULT_ORG_ID}`` so existing
+      instances keep working — their sessions are all the default org (M1
+      backfill).
+    """
+    if not caller_email:
+        return {_DEFAULT_ORG_ID}
+    store = get_data_store()
+    profs = store.query_records("profiles", filters={"email": caller_email})
+    prof = profs[0] if profs else None
+
+    is_super_admin = bool(prof and prof.get("role") == "admin")
+    if is_super_admin:
+        if org_header and _is_org_member(store, str(prof["id"]), org_header):
+            return {org_header}
+        return None  # all orgs
+
+    if not prof:
+        return {_DEFAULT_ORG_ID}
+    org_ids = _member_org_ids(store, str(prof["id"]))
+    return org_ids or {_DEFAULT_ORG_ID}
+
+
+def _member_org_ids(store, user_id_str: str) -> set[str]:
+    """org_ids the user is a member of (organization_members)."""
+    rows = store.query_records(
+        "organization_members", filters={"user_id": user_id_str}
+    )
+    return {str(r["org_id"]) for r in rows if r.get("org_id")}
+
+
+def _is_org_member(store, user_id_str: str, org_id: str) -> bool:
+    return org_id in _member_org_ids(store, user_id_str)
