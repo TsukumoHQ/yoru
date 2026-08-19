@@ -195,6 +195,80 @@ def event_entry_hash(prev_hash: str, ts, kind, tool, path, content,
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# --- Chain v2: commit-to-digest (S3, design trovex:28547568 §2) ---------------
+#
+# The v0 chain (event_entry_hash) commits over the *plaintext* content, so
+# nulling content at rest to satisfy GDPR erasure would break tamper-evidence.
+# v2 commits over sha256(plaintext) instead: redacting the plaintext leaves the
+# committed digest — and therefore the chain — intact and still verifiable.
+CHAIN_VERSION_V2 = 2
+
+# Content-bearing fields the v2 chain commits by digest (the redactable channel,
+# per design §1a). Everything else (ts/kind/tool/path/tokens/cost) is
+# non-sensitive metadata and stays committed in the clear.
+_DIGEST_FIELDS: tuple[str, ...] = ("content", "tool_input", "tool_response")
+
+
+def _field_digest(value) -> str | None:
+    """sha256 of one content-bearing field, or None when the field is absent.
+
+    Strings hash as UTF-8 bytes; structured values (raw.tool_input /
+    raw.tool_response are arbitrary JSON) hash over a canonical JSON encoding
+    so the digest is stable across equal-but-reordered dicts.
+    """
+    import hashlib
+    import json
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        payload = value.encode("utf-8")
+    else:
+        payload = json.dumps(value, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def compute_content_digests(content, tool_input, tool_response) -> dict[str, str | None]:
+    """Per-field content commitments for a v2 event. Keys are always present
+    (null when the field was absent at ingest) so the stored shape is stable
+    and a later at-rest redaction (S4) is distinguishable from never-present."""
+    return {
+        "content": _field_digest(content),
+        "tool_input": _field_digest(tool_input),
+        "tool_response": _field_digest(tool_response),
+    }
+
+
+def event_entry_hash_v2(prev_hash: str, ts, kind, tool, path,
+                        digests: dict[str, str | None],
+                        tokens_input, tokens_output, cost_usd) -> str:
+    """v2 chain hash: same metadata columns as v0, but the content-bearing
+    fields are represented by their sha256 digests (a content *commitment*)
+    rather than the plaintext. Shared by ingest (write) and verify (recompute)
+    so both hash identically. `digests` is sorted into the canonical form so
+    dict ordering never affects the result."""
+    import hashlib
+    import json
+
+    canonical = json.dumps(
+        {
+            "v": CHAIN_VERSION_V2,
+            "prev": prev_hash or "",
+            "ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            "kind": kind,
+            "tool": tool,
+            "path": path,
+            "digests": {k: digests.get(k) for k in _DIGEST_FIELDS},
+            "ti": tokens_input,
+            "to": tokens_output,
+            "cost": cost_usd,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _billing_enabled() -> bool:
     """Whether the monthly ingest quota/paywall applies.
 
@@ -495,7 +569,11 @@ class EventsRouter:
                 sess.flagged = True
                 flagged_ids.add(sess.id)
 
-            # Tamper-evident chain: link each event to the previous one.
+            # Tamper-evident chain (v2, commit-to-digest): link each event to
+            # the previous one, but commit over sha256(content-bearing field)
+            # not the plaintext — so at-rest redaction (S4) leaves the chain
+            # verifiable. prev_hash linkage is version-agnostic, so a new v2
+            # event chains cleanly onto a legacy v0 tail.
             prev_hash = chain_tip.get(e.session_id)
             if prev_hash is None:
                 last = session.exec(
@@ -504,12 +582,17 @@ class EventsRouter:
                     .order_by(Event.id.desc())
                 ).first()
                 prev_hash = (last.entry_hash if last and last.entry_hash else "")
-            entry_hash = event_entry_hash(
-                prev_hash, ts, e.kind, e.tool, e.path, e.content,
+            raw_dict = e.raw if isinstance(e.raw, dict) else {}
+            digests = compute_content_digests(
+                e.content, raw_dict.get("tool_input"), raw_dict.get("tool_response"),
+            )
+            entry_hash = event_entry_hash_v2(
+                prev_hash, ts, e.kind, e.tool, e.path, digests,
                 e.tokens_input, e.tokens_output, e.cost_usd,
             )
             chain_tip[e.session_id] = entry_hash
 
+            import json as _json
             ev_row = Event(
                 session_id=e.session_id,
                 ts=ts,
@@ -527,6 +610,8 @@ class EventsRouter:
                 git_branch=e.git_branch,
                 prev_hash=prev_hash,
                 entry_hash=entry_hash,
+                chain_version=CHAIN_VERSION_V2,
+                content_digest=_json.dumps(digests, sort_keys=True),
                 entry_uuid=e.entry_uuid,
                 retention_expires_at=_retention_expires_at(ts),
             )

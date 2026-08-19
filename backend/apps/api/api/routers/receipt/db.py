@@ -108,6 +108,13 @@ def init_db() -> None:
         # only these additive columns need a hand-applied ALTER on live rows.
         if "retention_expires_at" not in ev_cols:
             conn.execute(text("ALTER TABLE events ADD COLUMN retention_expires_at TIMESTAMP"))
+        # Chain v2 (S3, design trovex:28547568 §2): commit-to-digest columns.
+        # Additive + backward-compatible — existing rows keep chain_version
+        # NULL (verified as legacy v0 over plaintext); new writes are v2.
+        if "chain_version" not in ev_cols:
+            conn.execute(text("ALTER TABLE events ADD COLUMN chain_version INTEGER"))
+        if "content_digest" not in ev_cols:
+            conn.execute(text("ALTER TABLE events ADD COLUMN content_digest TEXT"))
 
         # Phase B migration: hook_tokens → cli_tokens + type split. Idempotent.
         has_cli = conn.execute(text(

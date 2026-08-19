@@ -99,6 +99,22 @@ class Event(SQLModel, table=True):
     # GET /sessions/{id}/verify. This is what makes the trail court-usable.
     entry_hash: Optional[str] = Field(default=None)
     prev_hash: Optional[str] = Field(default=None)
+    # Chain version marker (S3, design trovex:28547568 §2). NULL/0 = legacy
+    # v0 rows whose chain commits over PLAINTEXT content — redacting them
+    # breaks the chain. `2` = commit-to-digest: the chain commits over
+    # sha256(content-bearing field), never the plaintext, so redacting the
+    # plaintext at rest leaves the chain intact and still verifiable
+    # (reconciles Art.12 tamper-evidence with GDPR Art.17 erasure). Existing
+    # v0 rows are NEVER rewritten to v2 — rewriting history is itself
+    # indistinguishable from tampering.
+    chain_version: Optional[int] = Field(default=None)
+    # v2 content commitments: JSON {"content": <sha256|null>,
+    # "tool_input": <sha256|null>, "tool_response": <sha256|null>}. Each
+    # non-null digest is what the v2 chain committed to at ingest. When the
+    # plaintext is still present verify cross-checks sha256(plaintext) against
+    # it (catches plaintext edits); once the plaintext is redacted/nulled (S4)
+    # the committed digest carries the chain on its own. NULL on v0 rows.
+    content_digest: Optional[str] = Field(default=None)
     # Stable per-event dedup key from the source transcript (line uuid + block
     # index). Lets the tailer re-read a transcript idempotently — the backend
     # skips an (session_id, entry_uuid) it already has — so events survive

@@ -817,7 +817,14 @@ class SessionsRouter:
         edit, deletion, or reorder of events is detectable. This is what makes
         the trail usable as evidence.
         """
-        from .events_router import event_entry_hash
+        import json as _json
+
+        from .events_router import (
+            CHAIN_VERSION_V2,
+            _field_digest,
+            event_entry_hash,
+            event_entry_hash_v2,
+        )
 
         row = db.exec(
             select(SessionRow).where(SessionRow.id == session_id)
@@ -831,9 +838,13 @@ class SessionsRouter:
             .order_by(Event.id.asc())
         ).all()
 
+        # Verify walks the chain in order; each event is checked against its
+        # OWN chain version, so a session that starts v0 and continues v2
+        # (legacy tail + post-upgrade events) verifies correctly end to end.
         prev = ""
         verified = 0
         unchained = 0
+        redacted = 0
         broken_at = None
         for ev in events:
             if ev.entry_hash is None:
@@ -842,13 +853,61 @@ class SessionsRouter:
                 unchained += 1
                 prev = ev.entry_hash or prev
                 continue
-            expected = event_entry_hash(
-                prev, ev.ts, ev.kind, ev.tool, ev.path, ev.content,
-                ev.tokens_input, ev.tokens_output, ev.cost_usd,
-            )
-            if expected != ev.entry_hash or (ev.prev_hash or "") != prev:
-                broken_at = ev.id
-                break
+
+            if (ev.chain_version or 0) >= CHAIN_VERSION_V2:
+                # v2: the chain committed over the stored per-field digests, so
+                # recompute from those (they survive at-rest redaction). Then,
+                # for any field whose plaintext is still present, cross-check
+                # sha256(plaintext) against the committed digest — that catches
+                # a plaintext edit that left the digest column untouched.
+                digests = {}
+                if ev.content_digest:
+                    try:
+                        digests = _json.loads(ev.content_digest)
+                    except (ValueError, TypeError):
+                        digests = {}
+                expected = event_entry_hash_v2(
+                    prev, ev.ts, ev.kind, ev.tool, ev.path, digests,
+                    ev.tokens_input, ev.tokens_output, ev.cost_usd,
+                )
+                if expected != ev.entry_hash or (ev.prev_hash or "") != prev:
+                    broken_at = ev.id
+                    break
+                raw = ev.raw if isinstance(ev.raw, dict) else {}
+                live = {
+                    "content": ev.content,
+                    "tool_input": raw.get("tool_input"),
+                    "tool_response": raw.get("tool_response"),
+                }
+                tampered = False
+                any_redacted = False
+                for field, plaintext in live.items():
+                    committed = digests.get(field)
+                    if plaintext is None:
+                        # Field absent or redacted at rest; the committed digest
+                        # carries the chain. Count as redacted only when a
+                        # commitment existed (i.e. it was present, now nulled).
+                        if committed is not None:
+                            any_redacted = True
+                        continue
+                    if committed is not None and _field_digest(plaintext) != committed:
+                        tampered = True
+                        break
+                if tampered:
+                    broken_at = ev.id
+                    break
+                if any_redacted:
+                    redacted += 1
+            else:
+                # v0: chain committed over plaintext content.
+                expected = event_entry_hash(
+                    prev, ev.ts, ev.kind, ev.tool, ev.path, ev.content,
+                    ev.tokens_input, ev.tokens_output, ev.cost_usd,
+                )
+                if expected != ev.entry_hash or (ev.prev_hash or "") != prev:
+                    broken_at = ev.id
+                    break
+
             verified += 1
             prev = ev.entry_hash
 
@@ -859,6 +918,7 @@ class SessionsRouter:
             "event_count": len(events),
             "verified": verified,
             "unchained_legacy": unchained,
+            "redacted_verified": redacted,
             "broken_at_event_id": broken_at,
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
