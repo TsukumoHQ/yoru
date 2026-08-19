@@ -80,3 +80,6 @@ backend/data/.auth_jwt_secret
 
 # install-smoke pre-release wheel (transient)
 install-smoke/_wheel/
+
+# Local MCP wiring (per-agent trovex tokens etc.) — never track; edits must not dirty the merge target
+.mcp.json
