@@ -1,5 +1,6 @@
 import { createContext, useCallback, useEffect, useState, type ReactNode } from "react"
 import { getMe, signout as apiSignout, type AuthUser } from "../lib/auth-api"
+import { setSelectedOrgId } from "../lib/org-scope"
 
 interface AuthCtx {
   user: AuthUser | null
@@ -52,6 +53,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // ignore — cookies will be cleared regardless once browser refreshes
     }
     setUser(null)
+    // Clear the studio super-admin's org selection so a stale
+    // `X-Organization-Id` (persisted in localStorage) can't leak into the NEXT
+    // user's audit reads on a shared browser — a non-super-admin can't see or
+    // clear the switcher, and a foreign org id wedges every read to a 404.
+    setSelectedOrgId(null)
   }, [])
 
   return (

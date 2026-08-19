@@ -6,15 +6,17 @@
 // Fully inert unless BOTH hold: the caller is a super-admin AND the instance is
 // multi-tenant (`config.single_org === false`). On a single-org self-hosted box
 // this renders nothing and changes no behaviour.
+import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useSession } from "../../auth/useSession"
-import { useInstanceConfig } from "../../lib/config"
+import { useInstanceConfig, useInstanceConfigResolved } from "../../lib/config"
 import { listOrganizations } from "../../lib/api"
-import { setSelectedOrgId, useSelectedOrgId } from "../../lib/org-scope"
+import { getSelectedOrgId, setSelectedOrgId, useSelectedOrgId } from "../../lib/org-scope"
 
 export function OrgSwitcher() {
-  const { user } = useSession()
+  const { user, loading: authLoading } = useSession()
   const config = useInstanceConfig()
+  const configResolved = useInstanceConfigResolved()
   const selectedOrgId = useSelectedOrgId()
 
   const eligible = !!user?.is_super_admin && !config.single_org
@@ -26,6 +28,23 @@ export function OrgSwitcher() {
     staleTime: 60_000,
     meta: { silent: true },
   })
+
+  // Belt-and-suspenders alongside the signOut clear: if a selection survives
+  // into a genuinely ineligible state (super-admin demoted mid-session, config
+  // flips to single-org, or a session restored without a signOut), drop it so no
+  // stale `X-Organization-Id` reaches the audit reads.
+  //
+  // Gate on BOTH signals being resolved: on initial load `user` is null until
+  // /auth/session/me returns AND useInstanceConfig serves the single_org=true
+  // placeholder until /config returns, so `eligible` is transiently false. Only
+  // clear once we truly know the caller is not a super-admin — otherwise every
+  // reload would wipe a legit super-admin's persisted selection.
+  const resolved = !authLoading && configResolved
+  useEffect(() => {
+    if (resolved && !eligible && getSelectedOrgId() !== null) {
+      setSelectedOrgId(null)
+    }
+  }, [resolved, eligible])
 
   if (!eligible) return null
 

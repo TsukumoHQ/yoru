@@ -35,3 +35,20 @@ export function useInstanceConfig(): InstanceConfig {
   })
   return data ?? DEFAULT_CONFIG
 }
+
+// True once GET /config has actually resolved (success or error). While it's
+// pending, useInstanceConfig returns DEFAULT_CONFIG (single_org=true) as
+// placeholder data — callers that make a DESTRUCTIVE decision on the config
+// (e.g. clearing persisted state when the instance looks single-org) must wait
+// for this, or they'll act on the placeholder during the initial-load window.
+// Shares the same query cache key, so it adds no extra request.
+export function useInstanceConfigResolved(): boolean {
+  const { isSuccess, isError } = useQuery({
+    queryKey: ["instance", "config"],
+    queryFn: getInstanceConfig,
+    staleTime: 5 * 60_000,
+    retry: 0,
+    placeholderData: DEFAULT_CONFIG,
+  })
+  return isSuccess || isError
+}
