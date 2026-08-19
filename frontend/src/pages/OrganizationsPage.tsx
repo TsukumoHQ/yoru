@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch, ApiError } from "../lib/api"
+import { useInstanceConfig } from "../lib/config"
 import { toast } from "../components/Toaster"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -162,9 +163,14 @@ export function OrganizationsPage() {
     staleTime: 60_000,
     meta: { silent: true },
   })
+  const config = useInstanceConfig()
   const seatsMax = extractSeatsMax(subscription)
   const planName = subscription?.plan_name ?? "Free"
-  const canInvite = seatsMax < 0 || seatsMax > 1
+  // Seats are a billing concept. On a self-hosted instance (billing disabled)
+  // there is no seat limit and no upgrade path — a studio hosting N client-orgs
+  // must always be able to invite/manage members. Only gate on seats when
+  // billing is actually enabled.
+  const canInvite = !config.billing_enabled || seatsMax < 0 || seatsMax > 1
 
   const created = useMutation({
     mutationFn: createOrg,
