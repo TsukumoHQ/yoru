@@ -3,7 +3,9 @@ import type {
   SessionDetail,
   SessionList,
   Summary,
+  VcsProvider,
 } from "../types/receipt"
+import { KNOWN_VCS_PROVIDERS } from "@receipt/ui"
 import { mockListSessions, mockGetSession, mockGetSummary } from "../mocks/sessions"
 import { queryClient } from "./queryClient"
 
@@ -90,6 +92,7 @@ function qs(f: Filters): string {
   if (f.flag_only) p.set("flagged", "true")
   if (f.min_cost !== undefined) p.set("min_cost", String(f.min_cost))
   if (f.workspace_id) p.set("workspace_id", f.workspace_id)
+  if (f.vcs) p.set("vcs", f.vcs)
   if (f.limit !== undefined) p.set("limit", String(f.limit))
   if (f.offset !== undefined) p.set("offset", String(f.offset))
   // Hide 0-activity shells (interrupted prompts, spawned sub-agents) from the
@@ -114,6 +117,7 @@ interface RawSession {
   workspace_id?: string | null
   is_public?: boolean
   grade?: string | null
+  vcs?: string | null
 }
 
 // Backend rule_id (snake_case, per red_flags.py) → frontend RedFlagKind (kebab).
@@ -172,6 +176,18 @@ export function normalizeFlagCounts(
   return m
 }
 
+// Backend vcs is a provider slug (github|gitlab|bitbucket|azure) or null.
+// Validate against the known set so a future/unknown slug degrades to null
+// (no broken badge) rather than rendering an unstyled label — same defensive
+// stance as normalizeFlags.
+function normalizeVcs(raw: string | null | undefined): VcsProvider | null {
+  if (!raw) return null
+  const v = raw.trim().toLowerCase()
+  return (KNOWN_VCS_PROVIDERS as readonly string[]).includes(v)
+    ? (v as VcsProvider)
+    : null
+}
+
 function mapSession(r: RawSession): import("../types/receipt").Session {
   const start = Date.parse(r.started_at)
   const end = r.ended_at ? Date.parse(r.ended_at) : null
@@ -193,6 +209,7 @@ function mapSession(r: RawSession): import("../types/receipt").Session {
     workspace_id: r.workspace_id ?? null,
     is_public: Boolean(r.is_public),
     grade: r.grade ?? null,
+    vcs: normalizeVcs(r.vcs),
   }
 }
 
@@ -752,7 +769,10 @@ export interface GithubStatus {
 }
 
 export interface GithubRepo {
-  id: number
+  // GitHub repo ids are numeric; Bitbucket (BitbucketRepo, same shape) returns
+  // an opaque string UUID. Only ever used as a React key / DOM id, never for
+  // arithmetic, so the union is safe.
+  id: number | string
   full_name: string
   owner: string
   repo: string
@@ -804,6 +824,72 @@ export function buildGithubAuthUrl(redirectTo: string, scopes: string[] = ["read
   if (!supabaseUrl) throw new Error("VITE_SUPABASE_URL not set")
   const u = new URL(`${supabaseUrl.replace(/\/$/, "")}/auth/v1/authorize`)
   u.searchParams.set("provider", "github")
+  u.searchParams.set("redirect_to", redirectTo)
+  u.searchParams.set("scopes", scopes.join(" "))
+  return u.toString()
+}
+
+// ───── Bitbucket integration (twin of the GitHub surface) ─────
+// Same repo-mapping / auto-route model as GitHub — the only differences are the
+// OAuth provider slug, the host ('bitbucket.org'), and the status username
+// field (bitbucket_username vs github_login). Repo shape is identical.
+
+export interface BitbucketStatus {
+  connected: boolean
+  bitbucket_username?: string | null
+  connected_at?: string | null
+  expires_at?: string | null
+}
+
+// The /me/bitbucket/repos payload matches GithubRepo one-for-one (host is
+// 'bitbucket.org' instead of 'github.com'), so we reuse the shape.
+export type BitbucketRepo = GithubRepo
+
+export async function getBitbucketStatus(): Promise<BitbucketStatus> {
+  return apiFetch<BitbucketStatus>("/me/bitbucket")
+}
+
+export async function connectBitbucket(body: {
+  provider_token: string
+  scopes?: string[]
+}): Promise<BitbucketStatus> {
+  return apiFetch<BitbucketStatus>("/me/bitbucket/connect", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function disconnectBitbucket(): Promise<void> {
+  await apiFetch<void>("/me/bitbucket", { method: "DELETE" })
+}
+
+export async function listBitbucketRepos(
+  page: number = 1,
+  per_page: number = 100,
+): Promise<BitbucketRepo[]> {
+  return apiFetch<BitbucketRepo[]>(
+    `/me/bitbucket/repos?page=${page}&per_page=${per_page}`,
+  )
+}
+
+export async function autoRouteBitbucketRepos(body: {
+  workspace_id: string
+  repos: string[]
+}): Promise<{ added: number; skipped_already_mapped: number; errors: number }> {
+  return apiFetch("/me/bitbucket/auto-route", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function buildBitbucketAuthUrl(
+  redirectTo: string,
+  scopes: string[] = ["account", "repository"],
+): string {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
+  if (!supabaseUrl) throw new Error("VITE_SUPABASE_URL not set")
+  const u = new URL(`${supabaseUrl.replace(/\/$/, "")}/auth/v1/authorize`)
+  u.searchParams.set("provider", "bitbucket")
   u.searchParams.set("redirect_to", redirectTo)
   u.searchParams.set("scopes", scopes.join(" "))
   return u.toString()

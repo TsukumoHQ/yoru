@@ -2,6 +2,7 @@ export type {
   RedFlagKind,
   EventType,
   FileOp,
+  VcsProvider,
   Session,
   SessionEvent,
   FileChanged,

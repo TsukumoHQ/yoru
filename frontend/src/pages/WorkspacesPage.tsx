@@ -3,24 +3,102 @@ import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   apiFetch,
+  autoRouteBitbucketRepos,
   autoRouteRepos,
+  buildBitbucketAuthUrl,
   buildGithubAuthUrl,
   createWorkspace,
   deleteWorkspace,
+  disconnectBitbucket,
   disconnectGithub,
+  getBitbucketStatus,
   getGithubStatus,
+  listBitbucketRepos,
   listGithubRepos,
   listWorkspaceRepos,
   listWorkspaces,
   patchWorkspace,
   removeWorkspaceRepo,
   type GithubRepo,
-  type GithubStatus,
   type Workspace,
   type WorkspaceRepo,
 } from "../lib/api"
 import { extractQuotaLimit, useFeature } from "../lib/features"
 import { toast } from "../components/Toaster"
+
+// ─── VCS provider config ────────────────────────────────────────────────────
+// GitHub and Bitbucket share one connect / map-repos / auto-route surface; only
+// the OAuth provider, host, and status username field differ. A provider config
+// captures those differences so <VcsPanel> + <RepoPickerModal> stay generic.
+
+/** Normalized connection state (each provider's raw username field flattened
+ *  to `username`), so the panel doesn't branch on provider inside the view. */
+interface VcsConnState {
+  connected: boolean
+  username: string | null
+  connected_at?: string | null
+  expires_at?: string | null
+}
+
+interface VcsProviderConfig {
+  slug: "github" | "bitbucket"
+  label: string
+  /** Auth-callback path this provider redirects back to (matches Root.tsx). */
+  callbackPath: string
+  statusKey: readonly string[]
+  reposKey: readonly string[]
+  connectVerb: string
+  getStatus: () => Promise<VcsConnState>
+  buildAuthUrl: (callback: string) => string
+  disconnect: () => Promise<void>
+  listRepos: () => Promise<GithubRepo[]>
+  autoRoute: (body: {
+    workspace_id: string
+    repos: string[]
+  }) => Promise<{ added: number; skipped_already_mapped: number; errors: number }>
+}
+
+const GITHUB_CFG: VcsProviderConfig = {
+  slug: "github",
+  label: "GitHub",
+  callbackPath: "/integrations/github/callback",
+  statusKey: ["me", "github"],
+  reposKey: ["me", "github", "repos"],
+  connectVerb: "Connect GitHub →",
+  getStatus: () =>
+    getGithubStatus().then((s) => ({
+      connected: s.connected,
+      username: s.github_login ?? null,
+      connected_at: s.connected_at,
+      expires_at: s.expires_at,
+    })),
+  buildAuthUrl: (cb) => buildGithubAuthUrl(cb),
+  disconnect: disconnectGithub,
+  listRepos: () => listGithubRepos(),
+  autoRoute: autoRouteRepos,
+}
+
+const BITBUCKET_CFG: VcsProviderConfig = {
+  slug: "bitbucket",
+  label: "Bitbucket",
+  callbackPath: "/integrations/bitbucket/callback",
+  statusKey: ["me", "bitbucket"],
+  reposKey: ["me", "bitbucket", "repos"],
+  connectVerb: "Connect Bitbucket →",
+  getStatus: () =>
+    getBitbucketStatus().then((s) => ({
+      connected: s.connected,
+      username: s.bitbucket_username ?? null,
+      connected_at: s.connected_at,
+      expires_at: s.expires_at,
+    })),
+  buildAuthUrl: (cb) => buildBitbucketAuthUrl(cb),
+  disconnect: disconnectBitbucket,
+  listRepos: () => listBitbucketRepos(),
+  autoRoute: autoRouteBitbucketRepos,
+}
+
+const VCS_PROVIDERS_CFG: VcsProviderConfig[] = [GITHUB_CFG, BITBUCKET_CFG]
 
 interface Organization {
   id: string
@@ -34,7 +112,6 @@ interface OrgListResponse {
 
 const WS_KEY = ["me", "workspaces"] as const
 const ORGS_KEY = ["me", "organizations"] as const
-const GITHUB_KEY = ["me", "github"] as const
 const reposKey = (wsId: string) =>
   ["me", "workspaces", wsId, "repos"] as const
 
@@ -77,12 +154,16 @@ export function WorkspacesPage() {
           Workspaces
         </h1>
         <p className="mt-2 text-sm text-ink-muted">
-          Where your Claude Code sessions land. Connect GitHub to auto-route
-          repos, or create workspaces for specific projects.
+          Where your Claude Code sessions land. Connect GitHub or Bitbucket to
+          auto-route repos, or create workspaces for specific projects.
         </p>
       </div>
 
-      <GithubPanel workspaces={workspaces} />
+      <div className="space-y-3">
+        {VCS_PROVIDERS_CFG.map((cfg) => (
+          <VcsPanel key={cfg.slug} config={cfg} workspaces={workspaces} />
+        ))}
+      </div>
 
       <div className="grid gap-6 md:grid-cols-[220px_1fr]">
         <WorkspaceSidebar
@@ -138,31 +219,37 @@ export function WorkspacesPage() {
   )
 }
 
-// ─── GitHub panel ───────────────────────────────────────────────────────────
+// ─── VCS provider panel (GitHub / Bitbucket) ─────────────────────────────────
 
-function GithubPanel({ workspaces }: { workspaces: Workspace[] }) {
+function VcsPanel({
+  config,
+  workspaces,
+}: {
+  config: VcsProviderConfig
+  workspaces: Workspace[]
+}) {
   const qc = useQueryClient()
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  const { data: status } = useQuery<GithubStatus>({
-    queryKey: GITHUB_KEY,
-    queryFn: getGithubStatus,
+  const { data: status } = useQuery<VcsConnState>({
+    queryKey: config.statusKey,
+    queryFn: config.getStatus,
     meta: { silent: true },
   })
 
   const disconnectMut = useMutation({
-    mutationFn: disconnectGithub,
+    mutationFn: config.disconnect,
     onSuccess: () => {
-      toast.success("GitHub disconnected")
-      qc.invalidateQueries({ queryKey: GITHUB_KEY })
+      toast.success(`${config.label} disconnected`)
+      qc.invalidateQueries({ queryKey: config.statusKey })
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const handleConnect = () => {
-    const callback = `${window.location.origin}/integrations/github/callback`
+    const callback = `${window.location.origin}${config.callbackPath}`
     try {
-      window.location.href = buildGithubAuthUrl(callback)
+      window.location.href = config.buildAuthUrl(callback)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
     }
@@ -174,11 +261,11 @@ function GithubPanel({ workspaces }: { workspaces: Workspace[] }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-3">
             <h2 className="font-mono text-caption uppercase tracking-wider text-ink-muted">
-              GitHub
+              {config.label}
             </h2>
             {status?.connected && (
               <span className="font-mono text-micro text-ink-faint">
-                @{status.github_login ?? "?"}
+                @{status.username ?? "?"}
               </span>
             )}
           </div>
@@ -215,7 +302,7 @@ function GithubPanel({ workspaces }: { workspaces: Workspace[] }) {
               onClick={handleConnect}
               className="rounded-sm bg-accent-500 px-3 py-1 font-mono text-caption font-semibold uppercase tracking-wider text-paper hover:bg-accent-600"
             >
-              Connect GitHub →
+              {config.connectVerb}
             </button>
           )}
         </div>
@@ -223,6 +310,7 @@ function GithubPanel({ workspaces }: { workspaces: Workspace[] }) {
 
       {pickerOpen && (
         <RepoPickerModal
+          config={config}
           workspaces={workspaces}
           onClose={() => setPickerOpen(false)}
         />
@@ -604,8 +692,9 @@ function ReposSection({ workspace }: { workspace: Workspace }) {
           <li className="px-4 py-3 text-caption text-ink-muted">Loading…</li>
         ) : repos.length === 0 ? (
           <li className="px-4 py-4 text-caption text-ink-muted">
-            No repos mapped yet. Use "Map repos" above to assign GitHub repos
-            to this workspace — sessions from those repos will auto-route here.
+            No repos mapped yet. Use "Map repos" above to assign GitHub or
+            Bitbucket repos to this workspace — sessions from those repos will
+            auto-route here.
           </li>
         ) : (
           repos.map((r) => (
@@ -641,9 +730,11 @@ function ReposSection({ workspace }: { workspace: Workspace }) {
 // ─── Repo picker modal ─────────────────────────────────────────────────────
 
 function RepoPickerModal({
+  config,
   workspaces,
   onClose,
 }: {
+  config: VcsProviderConfig
   workspaces: Workspace[]
   onClose: () => void
 }) {
@@ -655,8 +746,8 @@ function RepoPickerModal({
   const [search, setSearch] = useState("")
 
   const { data: repos = [], isLoading, refetch } = useQuery<GithubRepo[]>({
-    queryKey: ["me", "github", "repos"],
-    queryFn: () => listGithubRepos(),
+    queryKey: config.reposKey,
+    queryFn: config.listRepos,
   })
 
   const filtered = useMemo(() => {
@@ -677,7 +768,7 @@ function RepoPickerModal({
 
   const applyMut = useMutation({
     mutationFn: () =>
-      autoRouteRepos({
+      config.autoRoute({
         workspace_id: workspaceId,
         repos: Array.from(selected),
       }),
@@ -688,7 +779,7 @@ function RepoPickerModal({
           ? `${resp.skipped_already_mapped} already mapped elsewhere — skipped.`
           : undefined,
       )
-      qc.invalidateQueries({ queryKey: ["me", "github", "repos"] })
+      qc.invalidateQueries({ queryKey: config.reposKey })
       qc.invalidateQueries({ queryKey: WS_KEY })
       onClose()
     },
@@ -733,7 +824,7 @@ function RepoPickerModal({
         <header className="flex items-start justify-between gap-4 border-b border-rule p-4">
           <div>
             <p className="font-mono text-micro uppercase tracking-wider text-ink-muted">
-              GitHub
+              {config.label}
             </p>
             <h3
               id="repo-picker-title"
@@ -798,7 +889,7 @@ function RepoPickerModal({
           ) : filtered.length === 0 ? (
             <p className="py-8 text-center text-sm text-ink-muted">
               {repos.length === 0
-                ? "No repos found. Did GitHub grant repo scope?"
+                ? `No repos found. Did ${config.label} grant repo scope?`
                 : "No repos match your filter."}
             </p>
           ) : (

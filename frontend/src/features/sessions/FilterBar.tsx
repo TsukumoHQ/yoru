@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { listWorkspaces, type Workspace } from "../../lib/api"
+import { VCS_PROVIDERS, vcsLabel } from "./vcs"
 
 function updateParam(
   params: URLSearchParams,
@@ -55,6 +56,7 @@ export function FilterBar() {
   const flagOnly = params.get("flag") === "1"
   const minCostParam = params.get("min_cost") ?? ""
   const workspaceParam = params.get("workspace_id") ?? ""
+  const vcsParam = params.get("vcs") ?? ""
 
   const workspacesQuery = useQuery<Workspace[]>({
     queryKey: ["me", "workspaces"],
@@ -97,7 +99,13 @@ export function FilterBar() {
   const isAllTime = !fromParam && !toParam
 
   const anyActive =
-    !!userParam || !!fromParam || !!toParam || flagOnly || !!minCostParam || !!workspaceParam
+    !!userParam ||
+    !!fromParam ||
+    !!toParam ||
+    flagOnly ||
+    !!minCostParam ||
+    !!workspaceParam ||
+    !!vcsParam
 
   return (
     <section
@@ -177,6 +185,31 @@ export function FilterBar() {
           ))}
         </select>
       </label>
+
+      <div className={labelCls}>
+        <span>VCS</span>
+        <div className="flex flex-wrap gap-1">
+          <button
+            type="button"
+            onClick={() => setOne("vcs", null)}
+            aria-pressed={!vcsParam}
+            className={chipCls(!vcsParam)}
+          >
+            All
+          </button>
+          {VCS_PROVIDERS.map((slug) => (
+            <button
+              key={slug}
+              type="button"
+              onClick={() => setOne("vcs", vcsParam === slug ? null : slug)}
+              aria-pressed={vcsParam === slug}
+              className={chipCls(vcsParam === slug)}
+            >
+              {vcsLabel(slug)}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Min-cost filter hidden pre-launch (see ROADMAP.md) — backend
           still accepts min_cost query param, UI surface just gone. */}

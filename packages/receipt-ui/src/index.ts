@@ -3,6 +3,7 @@ export type {
   RedFlagKind,
   EventType,
   FileOp,
+  VcsProvider,
   Session,
   SessionEvent,
   FileChanged,
@@ -19,7 +20,7 @@ export type {
 // Utilities
 export { formatCost, formatDuration, formatRelative } from "./format"
 export { redactTokens } from "./redact"
-export { useFilters, parseFilters } from "./filters"
+export { useFilters, parseFilters, KNOWN_VCS_PROVIDERS } from "./filters"
 
 // Primitives
 export { Badge, type FlagKind } from "./Badge"

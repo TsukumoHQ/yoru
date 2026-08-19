@@ -10,6 +10,11 @@ export type EventType = "tool_call" | "file_change" | "error" | "message"
 
 export type FileOp = "create" | "edit" | "delete"
 
+/** VCS provider slug — the git host family a session's remote belongs to.
+ *  Mirrors the backend registry (receipt/vcs.py KNOWN_PROVIDERS): provider slug
+ *  ONLY, never owner/repo, so it stays non-leaky for public sessions. */
+export type VcsProvider = "github" | "gitlab" | "bitbucket" | "azure"
+
 export interface Session {
   id: string
   user_email: string
@@ -34,6 +39,11 @@ export interface Session {
   /** A–F verdict (TSU-249), so the feed card can lead with the grade without
    *  fetching each session's detail. Same compute_score the detail uses. */
   grade?: string | null
+  /** VCS provider slug (github|gitlab|bitbucket|azure) derived from the
+   *  session's git remote host — provider only, never owner/repo, so it's safe
+   *  to badge on public sessions. NULL when the remote host is unknown or the
+   *  session had no git remote. Powers the per-card VCS badge + `?vcs=` filter. */
+  vcs?: VcsProvider | null
 }
 
 export interface SessionEvent {
@@ -103,6 +113,10 @@ export interface Filters {
   flag_only?: boolean
   min_cost?: number
   workspace_id?: string
+  /** Filter the feed to one VCS provider (github|gitlab|bitbucket|azure).
+   *  Maps to the backend `?vcs=` query param; an unknown slug 400s server-side,
+   *  so parseFilters only ever sets a KNOWN_PROVIDERS value here. */
+  vcs?: VcsProvider
   /** Pagination — the feed pages through with offset (backend list_sessions
    *  already supports limit/offset, started_at DESC). */
   limit?: number

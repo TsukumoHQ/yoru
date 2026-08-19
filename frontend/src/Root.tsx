@@ -6,6 +6,7 @@ import { RequireAuth } from "./auth/RequireAuth"
 import { AppShell } from "./components/AppShell"
 import { Toaster } from "./components/Toaster"
 import { AuthCallback } from "./pages/AuthCallback"
+import { BitbucketCallbackPage } from "./pages/BitbucketCallbackPage"
 import { BillingCancelPage } from "./pages/BillingCancelPage"
 import { BillingPage } from "./pages/BillingPage"
 import { BillingSuccessPage } from "./pages/BillingSuccessPage"
@@ -61,6 +62,7 @@ const router = createBrowserRouter([
       { path: "/settings/routing", element: <RoutingPage />, errorElement: <ErrorPage /> },
       { path: "/settings/workspaces", element: <WorkspacesPage />, errorElement: <ErrorPage /> },
       { path: "/integrations/github/callback", element: <GithubCallbackPage />, errorElement: <ErrorPage /> },
+      { path: "/integrations/bitbucket/callback", element: <BitbucketCallbackPage />, errorElement: <ErrorPage /> },
       { path: "/cli/pair", element: <PairCliPage />, errorElement: <ErrorPage /> },
       { path: "/billing/success", element: <BillingSuccessPage />, errorElement: <ErrorPage /> },
       { path: "/billing/cancel", element: <BillingCancelPage />, errorElement: <ErrorPage /> },

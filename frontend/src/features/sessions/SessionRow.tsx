@@ -1,8 +1,9 @@
 import { memo } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import type { Session } from "../../types/receipt"
+import type { Session, VcsProvider } from "../../types/receipt"
 import { formatCost, formatDuration, formatRelative } from "../../lib/format"
 import { RedFlagBadge } from "./RedFlagBadge"
+import { vcsLabel } from "./vcs"
 
 interface SessionRowProps {
   session: Session
@@ -43,10 +44,13 @@ function SessionRowImpl({ session, gridCols, workspaceName }: SessionRowProps) {
         )}
       </div>
       <div className={cellCls}>
-        <WorkspaceBadge
-          workspaceId={session.workspace_id ?? null}
-          name={workspaceName ?? null}
-        />
+        <div className="flex flex-wrap items-center gap-1">
+          <WorkspaceBadge
+            workspaceId={session.workspace_id ?? null}
+            name={workspaceName ?? null}
+          />
+          {session.vcs && <VcsBadge slug={session.vcs} />}
+        </div>
       </div>
       <div className={cellCls + " font-mono text-caption text-ink-muted"} title={session.started_at}>
         {formatRelative(session.started_at)}
@@ -115,6 +119,39 @@ function WorkspaceBadge({
           : "border-rule bg-sunken text-ink-muted hover:border-ink hover:text-ink")
       }
       title={workspaceId ? `Filter by ${label}` : "No workspace (fallback)"}
+    >
+      {label}
+    </button>
+  )
+}
+
+/** VCS-provider badge. Click filters the sessions list to that provider
+ *  (`?vcs=`), mirroring the WorkspaceBadge toggle behaviour. Provider slug
+ *  only — never owner/repo — so it stays safe on public sessions. */
+function VcsBadge({ slug }: { slug: VcsProvider }) {
+  const [params, setParams] = useSearchParams()
+  const active = params.get("vcs") === slug
+  const label = vcsLabel(slug)
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const next = new URLSearchParams(params)
+    if (active) next.delete("vcs")
+    else next.set("vcs", slug)
+    setParams(next, { replace: true })
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      aria-pressed={active}
+      className={
+        "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-micro transition-colors " +
+        (active
+          ? "border-ink bg-ink text-canvas"
+          : "border-rule bg-sunken text-ink-muted hover:border-ink hover:text-ink")
+      }
+      title={`Filter by ${label}`}
     >
       {label}
     </button>
