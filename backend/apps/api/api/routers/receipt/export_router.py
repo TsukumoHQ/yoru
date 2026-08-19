@@ -83,13 +83,80 @@ def _jsonl_line(row: SessionRow, events: list[Event]) -> str:
     return json.dumps(payload, default=str) + "\n"
 
 
+def _build_eu_ai_act_bundle(db, rows, *, org_scope, truncated, key) -> dict:
+    """Project rows into the eu-ai-act statement and return the SIGNED DSSE
+    envelope (the sole source of truth — no unsigned top-level copy). Shared by
+    the format=eu-ai-act export and the per-org /orgs/{id}/audit-export route."""
+    projected = [
+        eu_ai_act_mod.eu_ai_act_session(
+            r,
+            list(db.exec(
+                select(Event)
+                .where(Event.session_id == r.id)
+                .order_by(Event.id.asc())
+            ).all()),
+        )
+        for r in rows
+    ]
+    statement = eu_ai_act_mod.build_statement(
+        projected,
+        org_scope=org_scope,
+        truncated=truncated,
+        export_cap=_EXPORT_CAP,
+        predicate_type=dsse.PREDICATE_TYPE,
+    )
+    return dsse.build_envelope(statement, key)
+
+
+_NO_SIGNING_KEY_DETAIL = (
+    "export signing key not configured — set YORU_SIGNING_KEY to a base64 "
+    "Ed25519 seed (generate one with the yoru keygen helper). The eu-ai-act "
+    "bundle must be signed."
+)
+
+
 class ExportRouter:
     def __init__(self) -> None:
-        self.router = APIRouter(prefix="/sessions", tags=["receipt:export"])
-        self.router.get("/export")(self.export_sessions)
+        # No router-level prefix: this router owns two unrelated path roots —
+        # /sessions/export (all-formats stream) and the per-org compliance
+        # route /orgs/{org_id}/audit-export (M5, design 44a3774a §6). Full
+        # paths on each route keep both under the same /api/v1 mount.
+        self.router = APIRouter(tags=["receipt:export"])
+        self.router.get("/sessions/export")(self.export_sessions)
+        self.router.get("/orgs/{org_id}/audit-export")(self.export_org_audit)
 
     def get_router(self) -> APIRouter:
         return self.router
+
+    def _fetch_capped(
+        self,
+        db: SQLSession,
+        filters: list,
+        *,
+        from_: Optional[datetime],
+        to: Optional[datetime],
+        flagged_only: bool,
+    ) -> tuple[list[SessionRow], bool]:
+        """Apply the shared date/flag filters + 10k cap. Returns
+        ``(rows, truncated)`` — one +1 fetch detects overflow without a
+        second COUNT query. Shared by both export routes."""
+        if from_ is not None:
+            filters.append(SessionRow.started_at >= from_)
+        if to is not None:
+            filters.append(SessionRow.started_at <= to)
+        if flagged_only:
+            filters.append(SessionRow.flagged == True)  # noqa: E712
+        stmt = (
+            select(SessionRow)
+            .where(*filters)
+            .order_by(SessionRow.started_at.asc())
+            .limit(_EXPORT_CAP + 1)
+        )
+        rows = list(db.exec(stmt).all())
+        truncated = len(rows) > _EXPORT_CAP
+        if truncated:
+            rows = rows[:_EXPORT_CAP]
+        return rows, truncated
 
     def export_sessions(
         self,
@@ -117,24 +184,9 @@ class ExportRouter:
             if _DEFAULT_ORG_ID in orgs:
                 org_clause = or_(org_clause, SessionRow.org_id.is_(None))
             filters.append(org_clause)
-        if from_ is not None:
-            filters.append(SessionRow.started_at >= from_)
-        if to is not None:
-            filters.append(SessionRow.started_at <= to)
-        if flagged_only:
-            filters.append(SessionRow.flagged == True)  # noqa: E712
-
-        # +1 to detect overflow without a second COUNT query.
-        stmt = (
-            select(SessionRow)
-            .where(*filters)
-            .order_by(SessionRow.started_at.asc())
-            .limit(_EXPORT_CAP + 1)
+        rows, truncated = self._fetch_capped(
+            db, filters, from_=from_, to=to, flagged_only=flagged_only
         )
-        rows = list(db.exec(stmt).all())
-        truncated = len(rows) > _EXPORT_CAP
-        if truncated:
-            rows = rows[:_EXPORT_CAP]
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
         headers = {"X-Truncated": "true" if truncated else "false"}
@@ -148,39 +200,10 @@ class ExportRouter:
             # key; an unsigned compliance bundle would be worthless, so refuse.
             key = dsse.load_signing_key()
             if key is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "export signing key not configured — set YORU_SIGNING_KEY "
-                        "to a base64 Ed25519 seed (generate one with the yoru "
-                        "keygen helper). The eu-ai-act bundle must be signed."
-                    ),
-                )
-            projected = [
-                eu_ai_act_mod.eu_ai_act_session(
-                    r,
-                    list(db.exec(
-                        select(Event)
-                        .where(Event.session_id == r.id)
-                        .order_by(Event.id.asc())
-                    ).all()),
-                )
-                for r in rows
-            ]
-            statement = eu_ai_act_mod.build_statement(
-                projected,
-                org_scope=orgs,
-                truncated=truncated,
-                export_cap=_EXPORT_CAP,
-                predicate_type=dsse.PREDICATE_TYPE,
+                raise HTTPException(status_code=409, detail=_NO_SIGNING_KEY_DETAIL)
+            bundle = _build_eu_ai_act_bundle(
+                db, rows, org_scope=orgs, truncated=truncated, key=key
             )
-            # The signed DSSE payload is the SOLE source of truth: emit ONLY the
-            # envelope (dsse + embedded public key), never a second, UNSIGNED
-            # copy of the statement at top level — a consumer reading an unsigned
-            # mirror could be fed divergent data (review-8d4a903c). Readers get
-            # the content by decoding dsse.payload (what `yoru verify-export`
-            # does after checking the signature).
-            bundle = dsse.build_envelope(statement, key)
             headers["Content-Disposition"] = (
                 f'attachment; filename="yoru-audit-export-{stamp}.eu-ai-act.json"'
             )
@@ -239,3 +262,63 @@ class ExportRouter:
         return StreamingResponse(
             gen_jsonl(), media_type="application/x-ndjson", headers=headers
         )
+
+    def export_org_audit(
+        self,
+        org_id: str,
+        from_: Optional[datetime] = Query(None, alias="from"),
+        to: Optional[datetime] = Query(None),
+        flagged_only: bool = Query(False),
+        db: SQLSession = Depends(get_session),
+        current_user: str = Depends(require_current_user),
+    ) -> Response:
+        """M5 (design 44a3774a §6): the per-org EU-AI-Act compliance export.
+
+        Path ``org_id`` names the tenant to export. It must reconcile with the
+        caller's tenant wall (``visible_scope_sync``): a member requesting an
+        org outside their membership gets a 404 (the org is not merely empty —
+        it is invisible, so we do not leak its existence); the studio
+        super-admin may export any org. Within the chosen org the same
+        email/group visibility as the sessions list still applies. Always the
+        signed eu-ai-act bundle — there is no unsigned per-org variant.
+        """
+        from apps.api.api.services.access.visibility import (
+            _DEFAULT_ORG_ID,
+            visible_scope_sync,
+        )
+        # Path is authoritative for the org selection — do NOT also honour an
+        # X-Organization-Id header here (it would be an ambiguous second
+        # selector). Resolve the wall from the caller's identity alone.
+        visible, orgs = visible_scope_sync(current_user)
+        if orgs is not None and org_id not in orgs:
+            # Regular member outside their tenant wall → 404 (never 403: an
+            # invisible org must not be distinguishable from a nonexistent one).
+            raise HTTPException(status_code=404, detail="organization not found")
+
+        filters = [] if visible is None else [SessionRow.user.in_(visible)]
+        org_clause = SessionRow.org_id == org_id
+        if org_id == _DEFAULT_ORG_ID:
+            # Legacy/pre-M1 NULL org_id rows belong to the default org.
+            org_clause = or_(org_clause, SessionRow.org_id.is_(None))
+        filters.append(org_clause)
+        rows, truncated = self._fetch_capped(
+            db, filters, from_=from_, to=to, flagged_only=flagged_only
+        )
+
+        # Signed compliance bundle is the only shape for this route (see
+        # export_sessions format=eu-ai-act); an unsigned bundle is worthless.
+        key = dsse.load_signing_key()
+        if key is None:
+            raise HTTPException(status_code=409, detail=_NO_SIGNING_KEY_DETAIL)
+        bundle = _build_eu_ai_act_bundle(
+            db, rows, org_scope={org_id}, truncated=truncated, key=key
+        )
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+        headers = {
+            "X-Truncated": "true" if truncated else "false",
+            "Content-Disposition": (
+                f'attachment; filename="yoru-audit-export-{org_id}-{stamp}'
+                f'.eu-ai-act.json"'
+            ),
+        }
+        return JSONResponse(bundle, headers=headers)

@@ -216,3 +216,149 @@ def test_export_eu_ai_act_signed_bundle(
     assert ev["chain_version"] == 2
     assert ev["content_digest"] == "d1"
     assert pred["requirement_manifest"]["frameworks"]  # Art.12/19/26 + ISO + NIST
+
+
+# ── M5: per-org compliance export  GET /orgs/{org_id}/audit-export ───────────
+# The tenant wall (visible_scope_sync) is driven off the caller's profile in
+# the data store; drive it with a fake store, same pattern as
+# test_org_read_scope's unit matrix, so these router tests stay hermetic.
+from apps.api.api.services.access import visibility as _V  # noqa: E402
+
+
+class _FakeStore:
+    def __init__(self, profiles=None, memberships=None):
+        self._profiles = profiles or []
+        self._memberships = memberships or []
+
+    def query_records(self, table, filters=None):
+        f = filters or {}
+        if table == "profiles":
+            return [p for p in self._profiles
+                    if all(p.get(k) == v for k, v in f.items())]
+        if table == "organization_members":
+            return [m for m in self._memberships
+                    if all(m.get(k) == v for k, v in f.items())]
+        return []
+
+    def get_record(self, table, rid):
+        if table == "profiles":
+            return next((p for p in self._profiles if p.get("id") == rid), None)
+        return None
+
+
+def _seed_org(db_session, sid, user, org_id, *, offset_sec=0):
+    _seed(db_session, sid, user, offset_sec=offset_sec)
+    db_session.commit()
+    db_session.get(SessionRow, sid).org_id = org_id
+    db_session.commit()
+
+
+def _signed_pred(resp):
+    bundle = resp.json()
+    assert dsse.verify_envelope(bundle) is True
+    assert "predicate" not in bundle          # signed payload = sole truth
+    return json.loads(base64.b64decode(bundle["dsse"]["payload"]))["predicate"]
+
+
+def test_org_audit_requires_auth(client):
+    assert client.get("/api/v1/orgs/org-acme/audit-export").status_code == 401
+
+
+def test_org_audit_member_exports_own_org(
+    client, db_session, mint_token, monkeypatch
+):
+    """A member exports their own org: signed bundle, scoped to that org and
+    to their within-org visibility (their own row in org-acme, not the
+    other-org row)."""
+    monkeypatch.setenv("YORU_SIGNING_KEY", _TEST_SEED_B64)
+    monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
+        profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
+        memberships=[{"user_id": "u2", "org_id": "org-acme"}],
+    ))
+    _raw, headers = mint_token("dev@acme.dev")
+    _seed_org(db_session, "o1", "dev@acme.dev", "org-acme", offset_sec=0)
+    _seed_org(db_session, "o2", "dev@acme.dev", "org-other", offset_sec=10)
+
+    resp = client.get("/api/v1/orgs/org-acme/audit-export", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert '.eu-ai-act.json"' in resp.headers["content-disposition"]
+    assert "org-acme" in resp.headers["content-disposition"]
+    pred = _signed_pred(resp)
+    assert pred["session_count"] == 1
+    assert pred["sessions"][0]["session_id"] == "o1"   # org-other walled out
+
+
+def test_org_audit_member_cross_org_is_404(
+    client, db_session, mint_token, monkeypatch
+):
+    """A member requesting an org outside their membership gets 404, not 403 —
+    an invisible tenant must be indistinguishable from a nonexistent one."""
+    monkeypatch.setenv("YORU_SIGNING_KEY", _TEST_SEED_B64)
+    monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
+        profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
+        memberships=[{"user_id": "u2", "org_id": "org-acme"}],
+    ))
+    _raw, headers = mint_token("dev@acme.dev")
+    _seed_org(db_session, "x1", "someone", "org-forbidden", offset_sec=0)
+
+    resp = client.get("/api/v1/orgs/org-forbidden/audit-export", headers=headers)
+    assert resp.status_code == 404
+
+
+def test_org_audit_super_admin_exports_any_org(
+    client, db_session, mint_token, monkeypatch
+):
+    """The studio super-admin may export any org, even one they aren't a member
+    of, and is not walled by within-org email visibility."""
+    monkeypatch.setenv("YORU_SIGNING_KEY", _TEST_SEED_B64)
+    monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
+        profiles=[{"id": "u1", "email": "boss@studio.dev", "role": "admin"}],
+    ))
+    _raw, headers = mint_token("boss@studio.dev")
+    _seed_org(db_session, "s1", "alice", "org-acme", offset_sec=0)
+    _seed_org(db_session, "s2", "bob", "org-other", offset_sec=10)
+
+    resp = client.get("/api/v1/orgs/org-acme/audit-export", headers=headers)
+    assert resp.status_code == 200, resp.text
+    pred = _signed_pred(resp)
+    assert pred["session_count"] == 1
+    assert pred["sessions"][0]["session_id"] == "s1"   # other org excluded
+
+
+def test_org_audit_default_org_includes_null_org_rows(
+    client, db_session, mint_token, monkeypatch
+):
+    """Exporting the default org sweeps legacy NULL-org_id rows (pre-M1)."""
+    monkeypatch.setenv("YORU_SIGNING_KEY", _TEST_SEED_B64)
+    monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
+        profiles=[{"id": "u1", "email": "boss@studio.dev", "role": "admin"}],
+    ))
+    _raw, headers = mint_token("boss@studio.dev")
+    _seed(db_session, "n1", "alice", offset_sec=0)          # org_id NULL
+    _seed_org(db_session, "n2", "bob", "org-acme", offset_sec=10)
+    db_session.commit()
+
+    resp = client.get(
+        f"/api/v1/orgs/{_V._DEFAULT_ORG_ID}/audit-export", headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    pred = _signed_pred(resp)
+    ids = {s["session_id"] for s in pred["sessions"]}
+    assert ids == {"n1"}   # NULL-org row swept into default; org-acme excluded
+
+
+def test_org_audit_requires_signing_key(
+    client, db_session, mint_token, monkeypatch
+):
+    """No signing key → 409, even for a valid in-wall org (checked after the
+    wall so a cross-org caller still gets 404, not a key hint)."""
+    monkeypatch.delenv("YORU_SIGNING_KEY", raising=False)
+    monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
+        profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
+        memberships=[{"user_id": "u2", "org_id": "org-acme"}],
+    ))
+    _raw, headers = mint_token("dev@acme.dev")
+    _seed_org(db_session, "k1", "dev@acme.dev", "org-acme", offset_sec=0)
+
+    resp = client.get("/api/v1/orgs/org-acme/audit-export", headers=headers)
+    assert resp.status_code == 409
