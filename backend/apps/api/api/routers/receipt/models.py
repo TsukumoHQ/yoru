@@ -636,6 +636,12 @@ class ServiceTokenCreateIn(SQLModel):
     org_id: str = Field(min_length=1)
     label: str = Field(min_length=1, max_length=128)
     scopes: Optional[list[str]] = Field(default=None)
+    # M4 (multi-tenant provisioning, design 44a3774a §4). Optional per-dev
+    # attribution: when set, the minted token is bound to this dev's email so
+    # their ingested events are attributed to them (not a synthetic service
+    # identity). The token always carries org_id, so a dev can only write into
+    # this org. Omit for a shared org/fleet token.
+    user_email: Optional[str] = Field(default=None, max_length=320)
 
 
 class ServiceTokenCreateOut(SQLModel):

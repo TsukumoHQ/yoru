@@ -845,11 +845,15 @@ class AuthRouter:
         token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         scopes_json = json.dumps(body.scopes or ["events:write"])
         now = _naive_utc_now()
+        # M4: bind the TENANT org_id so ingest via this token stamps
+        # sessions.org_id = this org (M2a). Optionally attribute to a specific
+        # dev (per-dev provisioning); otherwise a synthetic org-fleet identity.
         row = CliToken(
             id=uuid.uuid4().hex,
-            user=f"service:{body.org_id}",  # synthetic, not a real human
+            user=body.user_email or f"service:{body.org_id}",
             token_hash=token_hash,
             token_type="service",
+            org_id=body.org_id,
             workspace_id=workspace_id,
             minted_by_user_id=caller_email,
             label=body.label,
@@ -860,8 +864,8 @@ class AuthRouter:
         db.commit()
         db.refresh(row)
         _logger.info(
-            "service_token.created org=%s ws=%s by=%s label=%s",
-            body.org_id, workspace_id, caller_email, body.label,
+            "service_token.created org=%s ws=%s user=%s by=%s label=%s",
+            body.org_id, workspace_id, row.user, caller_email, body.label,
         )
         return ServiceTokenCreateOut(
             token=raw,
