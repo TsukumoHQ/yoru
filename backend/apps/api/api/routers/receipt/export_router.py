@@ -13,11 +13,13 @@ import json
 from datetime import datetime, timezone
 from typing import Iterator, Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import or_
 from sqlmodel import Session as SQLSession, select
 
+from apps.api.api.services.signing import dsse
+from . import eu_ai_act as eu_ai_act_mod
 from .db import get_session
 from .deps import require_current_user
 from .models import Event, Session as SessionRow
@@ -93,12 +95,12 @@ class ExportRouter:
         self,
         from_: Optional[datetime] = Query(None, alias="from"),
         to: Optional[datetime] = Query(None),
-        format: Literal["json", "csv", "otlp"] = Query("json"),
+        format: Literal["json", "csv", "otlp", "eu-ai-act"] = Query("json"),
         flagged_only: bool = Query(False),
         db: SQLSession = Depends(get_session),
         current_user: str = Depends(require_current_user),
         x_organization_id: Optional[str] = Header(None, alias="X-Organization-Id"),
-    ) -> StreamingResponse:
+    ) -> Response:
         # M5a (design 44a3774a §3/§6): org-wall the export — the last read path
         # still owner-only. Same tenant wall as the sessions list: a member sees
         # own+group within their org(s); a super-admin (visible None) sees all
@@ -136,6 +138,47 @@ class ExportRouter:
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
         headers = {"X-Truncated": "true" if truncated else "false"}
+
+        if format == "eu-ai-act":
+            # M5b (design §6 / steal #1): a SIGNED, offline-verifiable compliance
+            # bundle. Unlike the streamed formats this is one whole artifact — a
+            # DSSE/Ed25519 signature only means something over the complete
+            # payload — so it is built in memory (bounded by the 10k cap) and
+            # returned as a single JSON download. Requires the deployer's signing
+            # key; an unsigned compliance bundle would be worthless, so refuse.
+            key = dsse.load_signing_key()
+            if key is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "export signing key not configured — set YORU_SIGNING_KEY "
+                        "to a base64 Ed25519 seed (generate one with the yoru "
+                        "keygen helper). The eu-ai-act bundle must be signed."
+                    ),
+                )
+            projected = [
+                eu_ai_act_mod.eu_ai_act_session(
+                    r,
+                    list(db.exec(
+                        select(Event)
+                        .where(Event.session_id == r.id)
+                        .order_by(Event.id.asc())
+                    ).all()),
+                )
+                for r in rows
+            ]
+            statement = eu_ai_act_mod.build_statement(
+                projected,
+                org_scope=orgs,
+                truncated=truncated,
+                export_cap=_EXPORT_CAP,
+                predicate_type=dsse.PREDICATE_TYPE,
+            )
+            bundle = {**statement, **dsse.build_envelope(statement, key)}
+            headers["Content-Disposition"] = (
+                f'attachment; filename="yoru-audit-export-{stamp}.eu-ai-act.json"'
+            )
+            return JSONResponse(bundle, headers=headers)
 
         if format == "csv":
             def gen_csv() -> Iterator[str]:

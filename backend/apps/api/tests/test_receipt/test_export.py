@@ -19,6 +19,11 @@ from sqlmodel import Session as SQLSession
 
 from apps.api.api.routers.receipt.models import Event
 from apps.api.api.routers.receipt.models import Session as SessionRow
+from apps.api.api.services.signing import dsse
+
+# Fixed KAT seed (see test_signing_dsse.YORU_DOKAN_KAT) — used to sign bundles
+# deterministically in tests without minting a real per-install key.
+_TEST_SEED_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
 BASE_TS = datetime(2026, 4, 19, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -155,3 +160,54 @@ def test_export_walls_cross_org(client, db_session, mint_token):
     assert resp.status_code == 200, resp.text
     ids = {json.loads(ln)["session_id"] for ln in resp.text.split("\n") if ln}
     assert ids == {"e-mine"}  # org-acme session walled out of the export
+
+
+def test_export_eu_ai_act_requires_signing_key(
+    client, db_session, alice_headers, monkeypatch
+):
+    """The signed compliance bundle refuses (409) without a configured key."""
+    monkeypatch.delenv("YORU_SIGNING_KEY", raising=False)
+    _seed(db_session, "k1", "alice")
+    db_session.commit()
+    resp = client.get(
+        "/api/v1/sessions/export?format=eu-ai-act", headers=alice_headers
+    )
+    assert resp.status_code == 409
+
+
+def test_export_eu_ai_act_signed_bundle(
+    client, db_session, alice_headers, monkeypatch
+):
+    """M5b: signed, offline-verifiable, org-walled bundle with chain fields."""
+    monkeypatch.setenv("YORU_SIGNING_KEY", _TEST_SEED_B64)
+    _seed(db_session, "a1", "alice", flagged=True, flags=["shell_rm"])
+    db_session.add(Event(
+        session_id="a1", ts=BASE_TS, kind="tool_use", tool="Bash",
+        entry_hash="h1", prev_hash=None, chain_version=2,
+        content_digest="d1", flags=["shell_rm"],
+    ))
+    _seed(db_session, "a2", "bob")  # other owner → walled out
+    db_session.commit()
+
+    resp = client.get(
+        "/api/v1/sessions/export?format=eu-ai-act", headers=alice_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("application/json")
+    assert '.eu-ai-act.json"' in resp.headers["content-disposition"]
+
+    bundle = resp.json()
+    # Offline signature verifies over the embedded canonical payload.
+    assert dsse.verify_envelope(bundle) is True
+    assert bundle["ed25519"]["public_key"]
+    assert bundle["dsse"]["payloadType"] == dsse.DSSE_PAYLOAD_TYPE
+
+    pred = bundle["predicate"]
+    assert pred["session_count"] == 1  # alice only, bob excluded
+    s = pred["sessions"][0]
+    assert s["session_id"] == "a1"
+    ev = s["events"][0]
+    assert ev["entry_hash"] == "h1"       # tamper-evidence chain surfaced
+    assert ev["chain_version"] == 2
+    assert ev["content_digest"] == "d1"
+    assert pred["requirement_manifest"]["frameworks"]  # Art.12/19/26 + ISO + NIST
