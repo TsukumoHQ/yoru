@@ -8,9 +8,21 @@ import type {
 import { KNOWN_VCS_PROVIDERS } from "@receipt/ui"
 import { mockListSessions, mockGetSession, mockGetSummary } from "../mocks/sessions"
 import { queryClient } from "./queryClient"
+import { getSelectedOrgId } from "./org-scope"
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "1"
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8002/api/v1"
+
+// A studio super-admin scopes audit reads to one client-org by selecting it
+// (lib/org-scope). We forward the selection as `X-Organization-Id` on audit
+// reads only. For a regular member the header is a no-op — the backend always
+// scopes to the token's org — and naming another org returns 404
+// (indistinguishable). No selection → header omitted (super-admin sees all orgs).
+// See design doc trovex:44a3774a and the M3/M5 contract (msg 1301af63).
+function orgHeaders(): Record<string, string> {
+  const id = getSelectedOrgId()
+  return id ? { "X-Organization-Id": id } : {}
+}
 
 export class ApiError extends Error {
   constructor(public status: number, public body: string) {
@@ -219,7 +231,9 @@ export async function listSessions(filters: Filters): Promise<SessionList> {
     items: RawSession[]
     total?: number
     totals?: import("../types/receipt").SessionTotals
-  }>(`/sessions${qs(filters) ? `?${qs(filters)}` : ""}`)
+  }>(`/sessions${qs(filters) ? `?${qs(filters)}` : ""}`, {
+    headers: orgHeaders(),
+  })
   return {
     items: (raw.items ?? []).map(mapSession),
     total: raw.total ?? (raw.items ?? []).length,
@@ -262,6 +276,7 @@ export async function listActivity(
 ): Promise<import("../types/receipt").ActivityList> {
   const raw = await apiFetch<{ items: RawActivity[] }>(
     `/activity${qs(filters) ? `?${qs(filters)}` : ""}`,
+    { headers: orgHeaders() },
   )
   return { items: (raw.items ?? []).map(mapActivity) }
 }
@@ -321,7 +336,9 @@ function mapEventType(kind: string): import("../types/receipt").EventType {
 
 export async function getSession(id: string): Promise<SessionDetail> {
   if (USE_MOCKS) return mockGetSession(id)
-  const raw = await apiFetch<RawSessionDetail>(`/sessions/${id}`)
+  const raw = await apiFetch<RawSessionDetail>(`/sessions/${id}`, {
+    headers: orgHeaders(),
+  })
   const base = mapSession(raw)
   return {
     ...base,
@@ -966,5 +983,24 @@ export interface VerifyResult {
 }
 
 export function verifySession(id: string): Promise<VerifyResult> {
-  return apiFetch<VerifyResult>(`/sessions/${encodeURIComponent(id)}/verify`)
+  return apiFetch<VerifyResult>(`/sessions/${encodeURIComponent(id)}/verify`, {
+    headers: orgHeaders(),
+  })
+}
+
+// ── Organizations (studio super-admin org switcher) ─────────────────────────
+// GET /me/organizations is admin-widened per the M3 contract (msg 1301af63):
+// returns ALL orgs on the instance when the caller is a super-admin, otherwise
+// only the caller's own memberships.
+export interface OrgSummary {
+  id: string
+  name: string
+}
+
+export async function listOrganizations(): Promise<OrgSummary[]> {
+  const r = await apiFetch<{ items: OrgSummary[] } | OrgSummary[]>(
+    "/me/organizations",
+  )
+  const items = Array.isArray(r) ? r : r.items
+  return (items ?? []).map((o) => ({ id: o.id, name: o.name }))
 }

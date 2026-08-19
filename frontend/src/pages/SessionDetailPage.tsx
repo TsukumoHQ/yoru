@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, getSession, verifySession, type VerifyResult } from "../lib/api"
+import { useSelectedOrgId } from "../lib/org-scope"
 import type { SessionDetail } from "../types/receipt"
 import { SessionReplay } from "@receipt/ui"
 import { SessionHero } from "../features/sessions/SessionHero"
@@ -11,8 +12,9 @@ import { Timeline } from "../features/sessions/Timeline"
 
 export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const orgId = useSelectedOrgId()
   const query = useQuery<SessionDetail>({
-    queryKey: ["session", id],
+    queryKey: ["session", id, orgId],
     queryFn: () => getSession(id as string),
     enabled: Boolean(id),
     // Live-refresh: new events (hooks + transcript tailer) flow in every few

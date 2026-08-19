@@ -15,6 +15,11 @@ export interface AuthUser {
   first_name?: string | null
   last_name?: string | null
   avatar_url?: string | null
+  // Studio super-admin (deployer) — derived server-side from profiles.role
+  // =='admin' and exposed as a bool so the role enum never reaches the client
+  // (M3 contract, msg 1301af63). Gates the cross-org org switcher. Absent on
+  // older backends → treated as false (no cross-org UI).
+  is_super_admin?: boolean
 }
 
 export class AuthError extends Error {

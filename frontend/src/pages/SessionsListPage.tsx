@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { listSessions, listWorkspaces, type Workspace } from "../lib/api"
+import { useSelectedOrgId } from "../lib/org-scope"
 import { FilterBar } from "../features/sessions/FilterBar"
 import { FleetStats } from "../features/sessions/FleetStats"
 import { useFilters } from "../features/sessions/filters"
@@ -10,10 +11,13 @@ import type { SessionList } from "../types/receipt"
 
 export function SessionsListPage() {
   const filters = useFilters()
+  const orgId = useSelectedOrgId()
   const queryClient = useQueryClient()
 
+  // orgId is part of the key so a super-admin org switch refetches; the id is
+  // forwarded as X-Organization-Id inside listSessions (lib/api orgHeaders).
   const query = useQuery<SessionList>({
-    queryKey: ["sessions", filters],
+    queryKey: ["sessions", filters, orgId],
     queryFn: () => listSessions(filters),
   })
 

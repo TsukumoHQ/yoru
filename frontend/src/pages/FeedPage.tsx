@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query"
 import { listActivity } from "../lib/api"
+import { useSelectedOrgId } from "../lib/org-scope"
 import { useFilters } from "../features/sessions/filters"
 import { FilterBar } from "../features/sessions/FilterBar"
 import { ActivityRow } from "../features/sessions/ActivityRow"
@@ -16,10 +17,11 @@ const PAGE = 40
 // dashboard only — never the public /s/:id surface.
 export function FeedPage() {
   const filters = useFilters()
+  const orgId = useSelectedOrgId()
   const queryClient = useQueryClient()
 
   const query = useInfiniteQuery<ActivityList>({
-    queryKey: ["activity", filters],
+    queryKey: ["activity", filters, orgId],
     queryFn: ({ pageParam }) =>
       listActivity({ ...filters, limit: PAGE, offset: pageParam as number }),
     initialPageParam: 0,

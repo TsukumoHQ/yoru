@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useSession } from "../auth/useSession"
 import { UpgradeBanner } from "../features/billing/UpgradeBanner"
 import { NotificationBell } from "../features/notifications/NotificationBell"
+import { OrgSwitcher } from "../features/orgs/OrgSwitcher"
 import { apiFetch, ApiError } from "../lib/api"
 import { useInstanceConfig } from "../lib/config"
 
@@ -121,6 +122,7 @@ export function AppShell() {
             </nav>
           </div>
           <div className="flex items-center gap-3">
+            <OrgSwitcher />
             {config.billing_enabled && <PlanBadge plan={plan} />}
             <NotificationBell />
             <span className="hidden text-caption text-ink-muted md:inline">{user?.email}</span>
