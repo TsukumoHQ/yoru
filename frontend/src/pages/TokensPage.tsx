@@ -74,6 +74,39 @@ function tokenLabel(label: string | null | undefined): string {
   return label?.trim() || "(no label)"
 }
 
+// Exception-first ordering (DEC-yoru-product-principle-1) for paired
+// devices: a device that's never checked in, or has gone quiet, is what
+// needs a look — a wall of "used 4h ago" rows chronologically isn't. Revoked
+// rows carry no forward-looking urgency, so they're excluded from this and
+// kept in their own chronological tail (see `visibleMyTokens` below).
+const STALE_DAYS = 30
+const DAY_MS = 86_400_000
+
+type DeviceUrgency = "never-used" | "stale" | "active"
+
+function deviceUrgency(t: UserTokenItem): DeviceUrgency {
+  if (!t.last_used_at) return "never-used"
+  const idleDays = (Date.now() - new Date(t.last_used_at).getTime()) / DAY_MS
+  return idleDays >= STALE_DAYS ? "stale" : "active"
+}
+
+const URGENCY_RANK: Record<DeviceUrgency, number> = {
+  "never-used": 0,
+  stale: 1,
+  active: 2,
+}
+
+function sortByUrgency(tokens: UserTokenItem[]): UserTokenItem[] {
+  return tokens.slice().sort((a, b) => {
+    const rankDiff = URGENCY_RANK[deviceUrgency(a)] - URGENCY_RANK[deviceUrgency(b)]
+    if (rankDiff !== 0) return rankDiff
+    // Same urgency tier: the one quiet longest needs attention soonest.
+    const aTime = new Date(a.last_used_at ?? a.created_at).getTime()
+    const bTime = new Date(b.last_used_at ?? b.created_at).getTime()
+    return aTime - bTime
+  })
+}
+
 export function TokensPage() {
   const qc = useQueryClient()
   const [showRevoked, setShowRevoked] = useState(false)
@@ -108,10 +141,10 @@ export function TokensPage() {
     },
   })
 
-  const visibleMyTokens = showRevoked
-    ? myTokens
-    : myTokens.filter((t) => !t.revoked_at)
-  const hiddenRevoked = myTokens.length - visibleMyTokens.length
+  const activeMine = sortByUrgency(myTokens.filter((t) => !t.revoked_at))
+  const revokedMine = myTokens.filter((t) => t.revoked_at)
+  const visibleMyTokens = showRevoked ? [...activeMine, ...revokedMine] : activeMine
+  const hiddenRevoked = showRevoked ? 0 : revokedMine.length
 
   return (
     <div className="mx-auto max-w-5xl space-y-8">
@@ -132,9 +165,15 @@ export function TokensPage() {
       {/* My machines */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="font-mono text-caption uppercase tracking-wider text-ink-muted">
-            My machines · {visibleMyTokens.length}
-          </h2>
+          <div>
+            <h2 className="font-mono text-caption uppercase tracking-wider text-ink-muted">
+              My machines · {visibleMyTokens.length}
+            </h2>
+            <p className="mt-0.5 text-micro text-ink-faint">
+              Never-used and quiet devices surface first. Personal tokens
+              follow you across orgs — they aren't org-scoped.
+            </p>
+          </div>
           {hiddenRevoked > 0 && (
             <button
               type="button"
@@ -273,6 +312,12 @@ function TokenList({
               <p className="truncate text-sm font-semibold text-ink">
                 {tokenLabel(t.label)}
               </p>
+              {t.machine_hostname && (
+                <span className="truncate font-mono text-micro text-ink-muted" title="Machine hostname">
+                  {t.machine_hostname}
+                </span>
+              )}
+              {!t.revoked_at && <DeviceUrgencyBadge token={t} />}
               {t.revoked_at && (
                 <span className="rounded-sm bg-sunken px-1.5 py-0.5 font-mono text-micro uppercase tracking-wider text-ink-muted">
                   revoked
@@ -306,6 +351,20 @@ function TokenList({
         </li>
       ))}
     </ul>
+  )
+}
+
+function DeviceUrgencyBadge({ token }: { token: UserTokenItem }) {
+  const urgency = deviceUrgency(token)
+  if (urgency === "active") return null
+  const label =
+    urgency === "never-used"
+      ? "never used"
+      : `inactive ${Math.floor((Date.now() - new Date(token.last_used_at!).getTime()) / DAY_MS)}d`
+  return (
+    <span className="rounded-sm bg-flag-migration/10 px-1.5 py-0.5 font-mono text-micro uppercase tracking-wider text-flag-migration">
+      {label}
+    </span>
   )
 }
 

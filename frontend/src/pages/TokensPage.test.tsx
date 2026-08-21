@@ -38,8 +38,29 @@ const mockedRevokeServiceToken = vi.mocked(revokeServiceToken)
 const TOKEN: UserTokenItem = {
   id: "tok_1",
   label: "MacBook Pro",
+  machine_hostname: "alices-macbook.local",
   created_at: "2026-08-01T00:00:00Z",
   last_used_at: "2026-08-20T00:00:00Z",
+  revoked_at: null,
+}
+
+// Same hostname as TOKEN, distinct id/label — a second identity paired from
+// the same machine (e.g. a re-pair after `yoru init` ran twice).
+const STALE_TOKEN: UserTokenItem = {
+  id: "tok_stale",
+  label: "Old pairing",
+  machine_hostname: "alices-macbook.local",
+  created_at: "2026-05-01T00:00:00Z",
+  last_used_at: "2026-06-01T00:00:00Z",
+  revoked_at: null,
+}
+
+const NEVER_USED_TOKEN: UserTokenItem = {
+  id: "tok_never",
+  label: "New CI box",
+  machine_hostname: "ci-runner-3.local",
+  created_at: "2026-08-19T00:00:00Z",
+  last_used_at: null,
   revoked_at: null,
 }
 
@@ -82,6 +103,32 @@ describe("TokensPage", () => {
     renderPage()
 
     expect(await screen.findByText("No personal tokens yet")).toBeInTheDocument()
+  })
+
+  it("shows each device's machine hostname, distinguishing two identities on the same machine", async () => {
+    mockedListMyTokens.mockResolvedValueOnce([TOKEN, STALE_TOKEN])
+    renderPage()
+
+    await screen.findByText("MacBook Pro")
+    await screen.findByText("Old pairing")
+    expect(screen.getAllByText("alices-macbook.local")).toHaveLength(2)
+  })
+
+  it("puts never-used and stale devices ahead of an active one, exception-first", async () => {
+    // API order: active, stale, never-used — rendering must NOT follow it.
+    mockedListMyTokens.mockResolvedValueOnce([TOKEN, STALE_TOKEN, NEVER_USED_TOKEN])
+    renderPage()
+
+    const rows = await screen.findAllByRole("listitem")
+    const order = rows.map((r) => r.textContent)
+    const neverIdx = order.findIndex((t) => t?.includes("New CI box"))
+    const staleIdx = order.findIndex((t) => t?.includes("Old pairing"))
+    const activeIdx = order.findIndex((t) => t?.includes("MacBook Pro"))
+
+    expect(neverIdx).toBeLessThan(staleIdx)
+    expect(staleIdx).toBeLessThan(activeIdx)
+    expect(screen.getByText("never used")).toBeInTheDocument()
+    expect(screen.getByText(/inactive \d+d/)).toBeInTheDocument()
   })
 
   it("shows a clean message (not a raw error) when a personal-token revoke loses the cross-tab race", async () => {
