@@ -6,10 +6,10 @@ types, and that `CanonicalEvent` is importable and round-trips through the
 backend's own dependency resolution. Catches drift at build/test time
 instead of a live ingest 400 from a version-skewed CLI.
 
-Retargeting the backend to literally construct `yoru_contract` types (and
-retargeting `scan_event` to consume `CanonicalEvent`) is design doc volet B,
-a separate follow-up — this ticket only ships the contract package and
-guards against the two schemas silently diverging.
+`red_flags.scan_event`/`scan_canonical_event` now retarget onto
+`CanonicalEvent` internally (design doc volet B, DEC-yoru-design-ruling-1) —
+see `test_canonical_event.py` for that translation + parity coverage. This
+file stays focused on the two schemas not silently diverging.
 """
 from __future__ import annotations
 

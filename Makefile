@@ -86,7 +86,7 @@ build-frontend:
 	else echo "frontend/package.json missing — skipping"; fi
 
 build-backend:
-	cd $(BACKEND) && docker build -t overnight-saas-api:dev .
+	docker build -f $(BACKEND)/Dockerfile -t overnight-saas-api:dev .
 
 down:
 	docker compose down

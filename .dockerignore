@@ -1,23 +1,60 @@
-# Two build families use the REPO ROOT as their Docker context:
+# THREE build families use the REPO ROOT as their Docker context:
 #   - install-smoke clean rooms (install-smoke/*.Dockerfile) — need install-smoke/
 #   - the dashboard image (frontend/Dockerfile) — needs the npm workspace
 #     manifests + packages/ + frontend/ sources
+#   - the backend API image (backend/Dockerfile, as of B.1/B.2 21c39486) —
+#     needs backend/ + the sibling packages/yoru-contract/ path-dep
+#     (DEC-yoru-design-ruling-1 §C); it moved off the old `./backend`-only
+#     context specifically so that sibling package is reachable.
 # Everything else (the 5GB+ of backend/data/*.db, node_modules, .worktrees,
 # build output, .git) would just bloat the context — and a live SQLite file
 # mid-write even breaks the tar. Keep the context tiny + deterministic.
 # marketing/ stays excluded: frontend/Dockerfile prunes missing workspaces, so
 # the dev tree builds the same way the filtered public mirror does.
 # A `.dockerignore` only applies at the CONTEXT root — per-directory copies
-# would be inert — so this file is the single gate for root-context builds.
-#
-# Note: the backend image builds from `./backend` context (see docker-compose.yml),
-# NOT the repo root, so this file does not affect it.
+# are INERT once the context is root, which is why `backend/.dockerignore`
+# was retired: its rules had to move HERE (below) or they'd silently stop
+# applying — a `backend/.env` or `backend/data/*.db` landing in the root
+# build context unnoticed is a real secret-adjacent leak risk, not just bloat.
 *
 !install-smoke
 !package.json
 !package-lock.json
 !packages
 !frontend
+!backend
 **/node_modules
 frontend/dist
 frontend/.env*
+
+# --- backend/ (was backend/.dockerignore, now dead — merged here) ---
+backend/data/
+backend/logs/
+backend/*.db
+backend/*.db-journal
+backend/*.db-wal
+backend/*.db-shm
+backend/*.bak
+backend/*.orig
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/*.pyd
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.mypy_cache/
+backend/**/*.egg-info/
+backend/build/
+backend/dist/
+backend/**/tests/
+backend/.venv/
+backend/venv/
+backend/env/
+backend/.env
+backend/.env.*
+!backend/.env.example
+backend/**/*.md
+!backend/README.md
+backend/.idea/
+backend/.vscode/
+backend/.DS_Store

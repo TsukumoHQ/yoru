@@ -9,6 +9,9 @@ import json
 import re
 from typing import TYPE_CHECKING
 
+from yoru_contract.canonical_event import CanonicalEvent
+
+from .canonical_event import to_canonical_event
 from .skill_safety import severity_of_skill_rule
 
 if TYPE_CHECKING:
@@ -188,6 +191,27 @@ def scan_event(e: "EventIn") -> list[str]:
     Order is stable: secret_* first (in declaration order), then shell_rm,
     shell_pipe_to_shell, shell_git_force, db_destructive, then migration_file,
     env_mutation, ci_config.
+
+    Retargeted (B.1/B.2, DEC-yoru-design-ruling-1) onto the agent-neutral
+    `CanonicalEvent` envelope — dispatch below reads `canonical.action` /
+    `canonical.tool.name` / `canonical.artifact.path` / `canonical.content_ref`,
+    never `e.kind`/`e.tool`/`e.path`/`e.content` directly, so a future adapter
+    filling the same envelope gets the same detection for free. The public
+    signature (`EventIn` in, wire format unchanged) and the raw-blob secret
+    scan (CC-specific `e.raw` depth — see the comment below) are the only
+    CC-shaped surfaces left; everything else runs through the envelope.
+    """
+    canonical = to_canonical_event(e)
+    return scan_canonical_event(canonical, raw=e.raw)
+
+
+def scan_canonical_event(canonical: "CanonicalEvent", *, raw: dict | None = None) -> list[str]:
+    """Same detection as `scan_event`, taking the envelope directly.
+
+    ``raw`` is the CC adapter's extra depth (`EventIn.raw`, everything except
+    `tool_response`) for the secret scan — optional, since a future
+    independent/non-CC adapter won't have a CC-shaped raw payload to offer;
+    `content_ref` alone is scanned in that case.
     """
     flags: list[str] = []
     seen: set[str] = set()
@@ -197,14 +221,14 @@ def scan_event(e: "EventIn") -> list[str]:
             seen.add(rule_id)
             flags.append(rule_id)
 
-    content = e.content or ""
+    content = canonical.content_ref or ""
     # Scan everything in `raw` EXCEPT `tool_response` — reading a file that
     # mentions a secret pattern is not exfiltration, it's discovery. That's
     # the only silently-skipped data source; the scanner is otherwise strict.
     # Judging "test fixture vs. real leak" is the reviewer's job, not the
     # scanner's — skipping scans based on path would be the scanner lying
     # about what it found, which defeats audit-grade discipline.
-    raw = e.raw if isinstance(e.raw, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
     raw_minus_response = {k: v for k, v in raw.items() if k != "tool_response"}
     raw_blob = json.dumps(raw_minus_response) if raw_minus_response else ""
 
@@ -212,9 +236,11 @@ def scan_event(e: "EventIn") -> list[str]:
         if pattern.search(content) or (raw_blob and pattern.search(raw_blob)):
             _add(rule_id)
 
+    tool_name = canonical.tool.name if canonical.tool else None
+
     if (
-        e.kind == "tool_use"
-        and e.tool in _SHELL_TOOLS
+        canonical.action == "tool_call"
+        and tool_name in _SHELL_TOOLS
         and content
     ):
         if _SHELL_RM_RE.search(content):
@@ -225,15 +251,16 @@ def scan_event(e: "EventIn") -> list[str]:
             _add("shell_git_force")
 
     if (
-        e.kind == "tool_use"
-        and e.tool in _DB_CLIENTS
+        canonical.action == "tool_call"
+        and tool_name in _DB_CLIENTS
         and content
         and any(p.search(content) for p in _DB_DESTRUCTIVE_RES)
     ):
         _add("db_destructive")
 
-    if e.kind == "file_change" and e.path:
-        path = e.path
+    artifact_path = canonical.artifact.path if canonical.artifact else None
+    if canonical.action == "file_change" and artifact_path:
+        path = artifact_path
         if any(p.search(path) for p in _MIGRATION_RES):
             _add("migration_file")
         if _ENV_MUTATION_RE.search(path):

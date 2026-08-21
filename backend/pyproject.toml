@@ -42,6 +42,15 @@ dependencies = [
     "psycopg[binary]>=3.1",
     # --- TSU-54 shareable receipt PNG (server-side render, self-hosted) ---
     "Pillow>=12.1.1,<13",  # CVE-2026-25990/40192/42309-42311 + PYSEC-2026-165 fixed in 12.x
+    # Co-located contract (DEC-yoru-design-ruling-1 §C) — CanonicalEvent +
+    # pairing wire types, versioned once, shared with yoru-cli. REAL runtime
+    # dep as of B.1/B.2 (21c39486): `red_flags.py` imports
+    # `yoru_contract.canonical_event` at module load, so this must resolve
+    # under `uv sync --no-dev` too, not just the dev/test extra. The Docker
+    # build context was widened from `backend/` to the repo root (matching
+    # `frontend/Dockerfile`'s existing pattern) specifically so the path-dep
+    # on `../packages/yoru-contract` stays reachable — see backend/Dockerfile.
+    "yoru-contract",
 ]
 
 [project.optional-dependencies]
@@ -50,15 +59,6 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.6,<0.7",
     "pip-audit>=2.7",
-    # Co-located contract (DEC-yoru-design-ruling-1 §C) — CanonicalEvent +
-    # pairing wire types, versioned once, shared with yoru-cli. dev-only:
-    # nothing in the running server imports it yet (retargeting scan_event
-    # is design doc volet B, a separate ticket) — only the drift-guard test
-    # does. Keeping it out of the production `dependencies` list also keeps
-    # it out of the Docker image's `uv sync --no-dev`, whose build context
-    # is scoped to backend/ and can't reach the sibling packages/ dir
-    # anyway (same class of fix as yoru-cli's dev-extra move).
-    "yoru-contract",
 ]
 observability = [
     "sentry-sdk[fastapi]>=2.0,<3.0",

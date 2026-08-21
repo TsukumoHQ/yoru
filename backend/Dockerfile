@@ -1,6 +1,10 @@
 # Receipt API — multi-stage production image (vault/DEPLOY-V0.md §1(a))
 #
-# Build:  docker build -t receipt-api:dev backend/
+# Build from the REPO ROOT context (the backend now has a real runtime dep
+# on the sibling `packages/yoru-contract/`, DEC-yoru-design-ruling-1 §C —
+# same reason frontend/Dockerfile already builds from root for `packages/
+# receipt-ui/`), e.g.:
+#   docker build -f backend/Dockerfile -t receipt-api:dev .
 # Run:    docker run --rm -p 8002:8002 receipt-api:dev
 
 # ============================================================================
@@ -23,12 +27,19 @@ RUN pip install --no-cache-dir "uv==0.4.30"
 WORKDIR /build
 
 # Copy lockfile + manifest first so a deps-only change rebuilds this layer
-# but a source-only change does not.
-COPY pyproject.toml uv.lock README.md ./
+# but a source-only change does not. yoru-contract's manifest too — it's a
+# real runtime dep (`red_flags.py` imports it), resolved via the path-dep
+# in [tool.uv.sources]; its `pyproject.toml` alone is enough for `uv sync`
+# to resolve versions, the actual source is copied in below.
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
+COPY packages/yoru-contract/pyproject.toml packages/yoru-contract/README.md ../packages/yoru-contract/
 
 # --no-dev drops pytest, pytest-asyncio, ruff. --frozen fails fast if uv.lock
 # is stale (better than silent drift). [tool.uv] package=false means uv only
-# installs deps; source is mounted at runtime via PYTHONPATH=/app.
+# installs deps; source is mounted at runtime via PYTHONPATH=/app. The
+# path-dep needs yoru-contract's actual source present too (a build backend
+# reads it even to resolve, not just to install) — copy it in before sync.
+COPY packages/yoru-contract/src ../packages/yoru-contract/src
 RUN uv sync --no-dev --frozen --no-install-project
 
 # ============================================================================
@@ -68,8 +79,8 @@ COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 # Source. apps/ holds the FastAPI app; libs/ holds log_manager (the only
 # libs.* module main.py and its router tree actually import). Other libs.*
 # subpackages travel along but are dormant — safe per ARCHITECTURE.md §2.
-COPY --chown=appuser:appuser apps /app/apps
-COPY --chown=appuser:appuser libs /app/libs
+COPY --chown=appuser:appuser backend/apps /app/apps
+COPY --chown=appuser:appuser backend/libs /app/libs
 
 USER appuser
 
