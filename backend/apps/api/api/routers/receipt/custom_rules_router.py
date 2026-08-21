@@ -26,7 +26,7 @@ from .models import CustomRule, CustomRuleIn, CustomRuleOut, CustomRuleUpdate
 
 def _wall(current_user: str, org_id: str, x_organization_id: str | None) -> None:
     from apps.api.api.services.access.visibility import visible_scope_sync
-    _visible, orgs = visible_scope_sync(current_user, x_organization_id)
+    _visible, orgs, _full = visible_scope_sync(current_user, x_organization_id)
     if orgs is not None and org_id not in orgs:
         raise HTTPException(status_code=404, detail="organization not found")
 

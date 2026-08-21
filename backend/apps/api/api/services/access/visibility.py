@@ -102,10 +102,12 @@ async def can_access_owner(user_id: UUID, owner_user_id: str | None) -> bool:
 # within-org email/group visibility above. This is the cross-tenant boundary
 # that makes one instance safely host N client-orgs.
 #
-# NOTE (deferred): per-org owner/admin "sees the whole org" is NOT yet wired —
-# a regular member still sees own+group within the org. The studio super-admin
-# (profiles.role=='admin') sees all orgs / the selected one. Per-org-admin
-# widening is a documented follow-up.
+# Per-org owner/admin visibility (4b22046a follow-up, task b153d228): an
+# ``organization_members.role in ('owner','admin')`` caller sees EVERY
+# member's rows within that org (not just own+group) — but gets no cross-org
+# reach, that stays the studio super-admin's alone (profiles.role=='admin').
+# A caller can hold different roles in different orgs (schema allows many
+# (org_id, user_id) rows), so the widening is per-org, not caller-wide.
 
 # Sentinel org for legacy/unscoped rows — kept in sync with receipt.models.
 _DEFAULT_ORG_ID = "default-org"
@@ -113,33 +115,48 @@ _DEFAULT_ORG_ID = "default-org"
 
 def visible_scope_sync(
     caller_email: str | None, org_header: str | None = None
-) -> tuple[set[str] | None, set[str] | None]:
-    """Resolve BOTH the email-visibility and the org-visibility from a SINGLE
-    ``profiles`` lookup (perf: the list path is query-count-budgeted).
+) -> tuple[set[str] | None, set[str] | None, set[str]]:
+    """Resolve email-visibility, org-visibility, and per-org "full visibility"
+    from a SINGLE ``profiles`` lookup (perf: the list path is query-count-
+    budgeted).
 
-    Returns ``(emails, orgs)`` — each ``None`` meaning "no restriction"
-    (super-admin). Mirrors ``visible_emails_sync`` + ``visible_org_ids_sync``
-    exactly, just without the duplicate profile query. Use this on the hot
-    read path; the two single-purpose helpers stay for other callers.
+    Returns ``(emails, orgs, full_org_ids)``:
+    - ``emails``: ``None`` = no email restriction (super-admin). A set
+      restricts to exactly those owners — EXCEPT within a ``full_org_ids``
+      org, where the caller (org owner/admin) sees every member regardless.
+    - ``orgs``: ``None`` = no org restriction (super-admin, all orgs). A set
+      restricts to exactly those org_ids.
+    - ``full_org_ids``: subset of ``orgs`` where the caller has org
+      owner/admin role — within THESE orgs specifically, every member's rows
+      are visible regardless of ``emails``. Empty for super-admin (moot:
+      ``emails`` is already ``None``) and for a caller with no owner/admin
+      org membership.
+
+    Mirrors ``visible_emails_sync`` + ``visible_org_ids_sync`` exactly (plus
+    the owner/admin widen), just without the duplicate profile query. Use
+    this on the hot read path; the two single-purpose helpers stay for other
+    callers that don't need the widen.
     """
     if not caller_email:
-        return {caller_email} if caller_email else set(), {_DEFAULT_ORG_ID}
+        return ({caller_email} if caller_email else set()), {_DEFAULT_ORG_ID}, set()
     store = get_data_store()
     profs = store.query_records("profiles", filters={"email": caller_email})
     prof = profs[0] if profs else None
 
     if prof and prof.get("role") == "admin":
         # Super-admin: all emails; all orgs (or a validly-owned selected org).
+        # full_org_ids is moot here — emails is already unrestricted.
         orgs: set[str] | None = None
         if org_header and _is_org_member(store, str(prof["id"]), org_header):
             orgs = {org_header}
-        return None, orgs
+        return None, orgs, set()
 
     if not prof:
         # CLI-only / no-profile identity → owner-only + default org.
-        return {caller_email}, {_DEFAULT_ORG_ID}
+        return {caller_email}, {_DEFAULT_ORG_ID}, set()
 
-    # Regular member: own + group-mates' emails; their org memberships.
+    # Regular member: own + group-mates' emails; their org memberships; the
+    # subset of those orgs where they hold owner/admin role.
     owner_ids = _co_member_user_ids(store, str(prof["id"]))
     emails: set[str] = {caller_email}
     for uid in owner_ids:
@@ -147,7 +164,58 @@ def visible_scope_sync(
         if p and p.get("email"):
             emails.add(p["email"])
     org_ids = _member_org_ids(store, str(prof["id"])) or {_DEFAULT_ORG_ID}
-    return emails, org_ids
+    full_org_ids = _owner_admin_org_ids(store, str(prof["id"])) & org_ids
+    return emails, org_ids, full_org_ids
+
+
+def _owner_admin_org_ids(store, user_id_str: str) -> set[str]:
+    """org_ids where the user's ``organization_members.role`` is owner/admin."""
+    rows = store.query_records("organization_members", filters={"user_id": user_id_str})
+    return {
+        str(r["org_id"]) for r in rows
+        if r.get("org_id") and r.get("role") in ("owner", "admin")
+    }
+
+
+def session_org_wall_clause(session_row_cls, visible, orgs, full_org_ids):
+    """Build the SQLAlchemy filter list for "sessions this caller may read",
+    given a NON-None ``orgs`` (callers special-case the super-admin
+    "no org restriction" case themselves — there is no clause to build then).
+
+    Centralizes the org/owner-admin/email composition so every read path
+    (sessions list, session detail, both export routes) enforces IDENTICAL
+    wall logic — this is BOLA-sensitive; one implementation beats N
+    independently hand-rolled copies that can quietly drift apart.
+
+    Takes ``session_row_cls`` (duck-typed: needs ``.org_id``/``.user``
+    columns) rather than importing ``receipt.models`` here, so this module
+    stays storage-agnostic like the rest of it.
+    """
+    from sqlalchemy import and_, or_
+
+    def _org_clause(ids):
+        clause = session_row_cls.org_id.in_(ids)
+        if _DEFAULT_ORG_ID in ids:
+            clause = or_(clause, session_row_cls.org_id.is_(None))
+        return clause
+
+    if not full_org_ids:
+        filters = [_org_clause(orgs)]
+        if visible is not None:
+            filters.append(session_row_cls.user.in_(visible))
+        return filters
+
+    # Mixed: full visibility within full_org_ids, email/group-gated in the
+    # rest of the caller's orgs (a caller can be owner in org A, plain member
+    # in org B — the widen must not leak into B).
+    plain_orgs = orgs - full_org_ids
+    clauses = [_org_clause(full_org_ids)]
+    if plain_orgs:
+        plain_clause = _org_clause(plain_orgs)
+        if visible is not None:
+            plain_clause = and_(plain_clause, session_row_cls.user.in_(visible))
+        clauses.append(plain_clause)
+    return [or_(*clauses)] if len(clauses) > 1 else clauses
 
 
 def visible_org_ids_sync(

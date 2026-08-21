@@ -169,21 +169,21 @@ class ExportRouter:
         x_organization_id: Optional[str] = Header(None, alias="X-Organization-Id"),
     ) -> Response:
         # M5a (design 44a3774a §3/§6): org-wall the export — the last read path
-        # still owner-only. Same tenant wall as the sessions list: a member sees
-        # own+group within their org(s); a super-admin (visible None) sees all
-        # orgs, or the one named by a valid X-Organization-Id. NULL org_id
-        # (legacy/pre-M1 rows) counts as the default org.
+        # still org/group-scoped, not owner-only. Same tenant wall as the
+        # sessions list, widened per-org for owner/admin (4b22046a follow-up):
+        # a plain member sees own+group within their org(s); an org owner/admin
+        # sees their whole org; a super-admin (orgs None) sees all orgs, or the
+        # one named by a valid X-Organization-Id. NULL org_id (legacy/pre-M1
+        # rows) counts as the default org.
         from apps.api.api.services.access.visibility import (
-            _DEFAULT_ORG_ID,
+            session_org_wall_clause,
             visible_scope_sync,
         )
-        visible, orgs = visible_scope_sync(current_user, x_organization_id)
-        filters = [] if visible is None else [SessionRow.user.in_(visible)]
-        if orgs is not None:
-            org_clause = SessionRow.org_id.in_(orgs)
-            if _DEFAULT_ORG_ID in orgs:
-                org_clause = or_(org_clause, SessionRow.org_id.is_(None))
-            filters.append(org_clause)
+        visible, orgs, full_org_ids = visible_scope_sync(current_user, x_organization_id)
+        if orgs is None:
+            filters = [] if visible is None else [SessionRow.user.in_(visible)]
+        else:
+            filters = session_org_wall_clause(SessionRow, visible, orgs, full_org_ids)
         rows, truncated = self._fetch_capped(
             db, filters, from_=from_, to=to, flagged_only=flagged_only
         )
@@ -229,8 +229,11 @@ class ExportRouter:
             # OTel-GenAI interop export (design §1/§8): one OTLP/JSON trace
             # (ExportTraceServiceRequest) per session, one per line — JSONL of
             # traces keeps the streaming + 10k-cap contract instead of buffering
-            # one giant array. Owner-scoped, full fidelity (uncapped raw payload
-            # + chain overlay). Any OTel backend can ingest each line as-is.
+            # one giant array. Org/group-scoped per the tenant wall built above
+            # (f790ab79: was stale "Owner-scoped" — M3/M5 widened this to the
+            # full org/email/group wall, not owner-only), full fidelity
+            # (uncapped raw payload + chain overlay). Any OTel backend can
+            # ingest each line as-is.
             from . import otel
 
             def gen_otlp() -> Iterator[str]:
@@ -278,8 +281,9 @@ class ExportRouter:
         caller's tenant wall (``visible_scope_sync``): a member requesting an
         org outside their membership gets a 404 (the org is not merely empty —
         it is invisible, so we do not leak its existence); the studio
-        super-admin may export any org. Within the chosen org the same
-        email/group visibility as the sessions list still applies. Always the
+        super-admin may export any org. Within the chosen org: an org
+        owner/admin (4b22046a follow-up) gets the whole org, a plain member
+        the same email/group visibility as the sessions list. Always the
         signed eu-ai-act bundle — there is no unsigned per-org variant.
         """
         from apps.api.api.services.access.visibility import (
@@ -289,18 +293,22 @@ class ExportRouter:
         # Path is authoritative for the org selection — do NOT also honour an
         # X-Organization-Id header here (it would be an ambiguous second
         # selector). Resolve the wall from the caller's identity alone.
-        visible, orgs = visible_scope_sync(current_user)
+        visible, orgs, full_org_ids = visible_scope_sync(current_user)
         if orgs is not None and org_id not in orgs:
             # Regular member outside their tenant wall → 404 (never 403: an
             # invisible org must not be distinguishable from a nonexistent one).
             raise HTTPException(status_code=404, detail="organization not found")
 
-        filters = [] if visible is None else [SessionRow.user.in_(visible)]
         org_clause = SessionRow.org_id == org_id
         if org_id == _DEFAULT_ORG_ID:
             # Legacy/pre-M1 NULL org_id rows belong to the default org.
             org_clause = or_(org_clause, SessionRow.org_id.is_(None))
-        filters.append(org_clause)
+        filters = [org_clause]
+        # Already scoped to exactly this one org_id above — the org is either
+        # a full_org_ids org (owner/admin: every member visible) or not (plain
+        # member/super-admin: apply the usual email/group gate).
+        if visible is not None and org_id not in full_org_ids:
+            filters.append(SessionRow.user.in_(visible))
         rows, truncated = self._fetch_capped(
             db, filters, from_=from_, to=to, flagged_only=flagged_only
         )

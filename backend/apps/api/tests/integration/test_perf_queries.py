@@ -109,7 +109,7 @@ def _stub_visibility(monkeypatch):
     # store round-trip and the N+1 count stays deterministic.
     monkeypatch.setattr(
         "apps.api.api.services.access.visibility.visible_scope_sync",
-        lambda caller_email, org_header=None: ({PERF_USER}, None),
+        lambda caller_email, org_header=None: ({PERF_USER}, None, set()),
     )
 
 

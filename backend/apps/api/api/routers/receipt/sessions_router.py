@@ -44,24 +44,30 @@ def _public_session_url(session_id: str) -> str:
 
 
 def _session_visible(row, current_user: str) -> bool:
-    """Group-scoped access: the owner, their group-mates, or an admin may act on
-    a session. The confidentiality wall is between groups, not within one. A
-    missing row returns False so callers 404 (not 403) and don't leak existence.
+    """Org owner/admin, group-scoped, or studio-admin access: the row's org
+    owner/admin sees any member's session in that org; otherwise the owner,
+    their group-mates, or the studio super-admin may act on it. The
+    confidentiality wall is between orgs (always) and between groups (within
+    a plain-member's own org). A missing row returns False so callers 404
+    (not 403) and don't leak existence.
     """
     if row is None:
         return False
     # M3: tenant wall first — the row's org must be in the caller's org set
     # (None = super-admin, all orgs). A NULL org_id (legacy/pre-M1 row) counts
-    # as the default org. Then the within-org email/group check.
+    # as the default org. Then: full visibility if the caller is owner/admin
+    # of THIS row's org (4b22046a follow-up), else the within-org email/group
+    # check.
     from apps.api.api.services.access.visibility import (
         _DEFAULT_ORG_ID,
         visible_scope_sync,
     )
-    visible, orgs = visible_scope_sync(current_user)
-    if orgs is not None:
-        row_org = getattr(row, "org_id", None) or _DEFAULT_ORG_ID
-        if row_org not in orgs:
-            return False
+    visible, orgs, full_org_ids = visible_scope_sync(current_user)
+    row_org = getattr(row, "org_id", None) or _DEFAULT_ORG_ID
+    if orgs is not None and row_org not in orgs:
+        return False
+    if row_org in full_org_ids:
+        return True
     return visible is None or row.user in visible
 
 # Tool-name classes for path/content extraction (v1 timeline enrichment).
@@ -380,20 +386,19 @@ class SessionsRouter:
         x_organization_id: Optional[str] = Header(None, alias="X-Organization-Id"),
     ) -> SessionListResponse:
         # M3 (design 44a3774a §3): tenant wall by org_id + within-org email/group
-        # visibility. A super-admin (visible_org_ids None) sees all orgs, or the
-        # one named by a valid X-Organization-Id; a member is walled to their org.
+        # visibility, widened per-org for owner/admin (4b22046a follow-up). A
+        # super-admin (orgs None) sees all orgs, or the one named by a valid
+        # X-Organization-Id; an org owner/admin sees their whole org; a plain
+        # member is walled to own+group within their org.
         from apps.api.api.services.access.visibility import (
-            _DEFAULT_ORG_ID,
+            session_org_wall_clause,
             visible_scope_sync,
         )
-        visible, orgs = visible_scope_sync(current_user, x_organization_id)
-        filters = [] if visible is None else [SessionRow.user.in_(visible)]
-        if orgs is not None:
-            # NULL org_id (legacy/pre-M1 rows) counts as the default org.
-            org_clause = SessionRow.org_id.in_(orgs)
-            if _DEFAULT_ORG_ID in orgs:
-                org_clause = or_(org_clause, SessionRow.org_id.is_(None))
-            filters.append(org_clause)
+        visible, orgs, full_org_ids = visible_scope_sync(current_user, x_organization_id)
+        if orgs is None:
+            filters = [] if visible is None else [SessionRow.user.in_(visible)]
+        else:
+            filters = session_org_wall_clause(SessionRow, visible, orgs, full_org_ids)
         if from_ts is not None:
             filters.append(SessionRow.started_at >= from_ts)
         if to_ts is not None:
