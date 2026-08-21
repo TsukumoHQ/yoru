@@ -340,6 +340,19 @@ Run through these after the first deploy; they confirm the full stack:
 - [ ] No "Upgrade" buttons appear (billing is off for self-host)
 - [ ] (If SMTP configured) a welcome / invite email lands in the inbox
 
+**Pre-existing git history**: `yoru init` only captures commits made *after*
+pairing — it deliberately does not backfill a repo's past history on first
+pair, so pairing a large existing repo never floods the dashboard. To also
+pull in commits that predate pairing, re-run with the opt-in flag:
+
+```bash
+yoru init --server https://yoru.acme.com --backfill-git
+```
+
+This is off by default and has to be asked for explicitly each time it's
+useful (e.g. once, right after pairing a repo you want full history for) —
+it is not something `yoru init` does automatically.
+
 All green → you're live.
 
 ---
