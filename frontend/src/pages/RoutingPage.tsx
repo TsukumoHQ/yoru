@@ -40,7 +40,7 @@ export function RoutingPage() {
   })
   const orgNameById = useMemo(() => {
     const m = new Map<string, string>()
-    for (const o of orgsResp?.items ?? []) m.set(o.id, o.name)
+    for (const o of Array.isArray(orgsResp?.items) ? orgsResp.items : []) m.set(o.id, o.name)
     return m
   }, [orgsResp])
 

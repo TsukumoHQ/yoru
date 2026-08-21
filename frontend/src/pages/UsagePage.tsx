@@ -76,7 +76,7 @@ export function UsagePage() {
     queryFn: () => apiFetch<OrgListResponse>("/me/organizations"),
   })
   const orgs = useMemo(
-    () => (orgsResp?.items ?? []).filter((o) => o.type === "team"),
+    () => (Array.isArray(orgsResp?.items) ? orgsResp.items : []).filter((o) => o.type === "team"),
     [orgsResp],
   )
   const activeOrg = selectedOrg || orgs[0]?.id || ""

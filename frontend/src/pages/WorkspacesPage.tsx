@@ -129,7 +129,7 @@ export function WorkspacesPage() {
     queryKey: ORGS_KEY,
     queryFn: () => apiFetch<OrgListResponse>("/me/organizations"),
   })
-  const orgs = orgsResp?.items ?? []
+  const orgs = Array.isArray(orgsResp?.items) ? orgsResp.items : []
   const orgNameById = useMemo(() => {
     const m = new Map<string, string>()
     for (const o of orgs) m.set(o.id, o.name)

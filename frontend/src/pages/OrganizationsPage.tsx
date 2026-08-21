@@ -76,8 +76,12 @@ const membersKey = (id: string) => ["me", "organizations", id, "members"] as con
 const invitesKey = (id: string) => ["me", "organizations", id, "invitations"] as const
 
 async function listOrgs(): Promise<Organization[]> {
-  const r = await apiFetch<OrgListResponse>("/me/organizations")
-  return r.items ?? []
+  try {
+    const r = await apiFetch<OrgListResponse | Organization[]>("/me/organizations")
+    return Array.isArray(r) ? r : (Array.isArray(r?.items) ? r.items : [])
+  } catch {
+    return []
+  }
 }
 
 async function createOrg(payload: { name: string }): Promise<Organization> {
