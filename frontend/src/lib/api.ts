@@ -1041,8 +1041,8 @@ export async function listOrganizations(): Promise<OrgSummary[]> {
   const r = await apiFetch<{ items: OrgSummary[] } | OrgSummary[]>(
     "/me/organizations",
   )
-  const items = Array.isArray(r) ? r : r.items
-  return (items ?? []).map((o) => ({ id: o.id, name: o.name }))
+  const items = Array.isArray(r) ? r : (Array.isArray(r?.items) ? r.items : [])
+  return items.map((o) => ({ id: o.id, name: o.name }))
 }
 
 // ---- Per-org signed EU AI Act audit export (multi-tenant M5) ----
