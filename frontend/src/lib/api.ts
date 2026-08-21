@@ -333,6 +333,8 @@ interface RawSessionDetail extends RawSession {
   summary?: string | null
   tools_called?: string[]
   score?: import("../types/receipt").SessionScore | null
+  agent_confidence?: string
+  enforce_available?: boolean
 }
 
 function mapEventType(kind: string): import("../types/receipt").EventType {
@@ -357,6 +359,8 @@ export async function getSession(id: string): Promise<SessionDetail> {
   const base = mapSession(raw)
   return {
     ...base,
+    agent_confidence: raw.agent_confidence ?? "unknown",
+    enforce_available: raw.enforce_available ?? false,
     // Split the raw event stream into timeline + usage channels.
     // Usage (kind=token) events power the rail TokenPanel + Hero sparkline;
     // keeping them out of the visible timeline avoids polluting the

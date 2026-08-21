@@ -115,6 +115,16 @@ export interface SessionDetail extends Session {
   files_changed: FileChanged[]
   summary?: string | null
   score?: SessionScore | null
+  /** B3 slice2.5 — session-level rollup of CanonicalEvent.agent_confidence.
+   *  "declared" if any event came from an adapter (real per-event intent
+   *  signal); "unknown" when every event is independent-capture (git-only,
+   *  no adapter ever ran). Computed on the fly server-side, never persisted.
+   *  Defaults to "unknown" for callers on an older contract. */
+  agent_confidence?: string
+  /** True only when agent_confidence === "declared" — enforce (pre-execution
+   *  blocking) has no independent-only equivalent, so an "unknown" session
+   *  must never be offered an enforce toggle. Defaults to false. */
+  enforce_available?: boolean
 }
 
 export interface Summary {

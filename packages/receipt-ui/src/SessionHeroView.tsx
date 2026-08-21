@@ -188,6 +188,15 @@ export function SessionHeroView({
           >
             {formatRelative(session.started_at)}
           </time>
+          {!session.enforce_available && (
+            <span
+              role="status"
+              title="This session was captured independently (git/fs), with no adapter attached — enforcement (pre-execution blocking) isn't available for it, audit-only."
+              className="inline-flex items-center gap-1 rounded-sm border border-rule px-1.5 py-0.5 normal-case tracking-normal text-ink-faint"
+            >
+              audit-only · enforcement unavailable
+            </span>
+          )}
         </p>
         {session.flags.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
