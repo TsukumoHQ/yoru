@@ -167,6 +167,20 @@ def test_approve_identity_label_defaults_when_no_label_sent(db_session) -> None:
     assert row.machine_hostname is None
 
 
+def test_poll_returns_identity_id_matching_the_minted_cli_token(db_session) -> None:
+    # A.3#3 — the CLI keys its local identity slot off this value, which
+    # MUST be the real server-issued CliToken.id (never a client-side hash
+    # of server_url+email, DEC-yoru-design-ruling-1 Q1).
+    router = _router()
+    device_code, user_code = _start(router, db_session)
+    _approve(router, db_session, user_code)
+
+    result = _poll(router, db_session, device_code)
+
+    row = _cli_token_for(db_session, "alice@example.com")
+    assert result.identity_id == row.id
+
+
 def _cli_token_for(db, user: str) -> CliToken:
     from sqlmodel import select
     return db.exec(

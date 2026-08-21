@@ -29,6 +29,7 @@ class DeviceCodePollRequest(BaseModel):
 class DeviceCodePollResponse(BaseModel):
     status: str  # pending|approved|expired|denied
     token: str | None = None
+    identity_id: str | None = None
 
 
 class DeviceCodeApproveRequest(BaseModel):

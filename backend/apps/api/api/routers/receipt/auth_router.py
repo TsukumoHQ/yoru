@@ -458,7 +458,7 @@ class AuthRouter:
                 db.delete(transient)
                 db.add(row)
                 db.commit()
-                return DeviceCodePollOut(status="approved", token=raw_token)
+                return DeviceCodePollOut(status="approved", token=raw_token, identity_id=row.cli_token_id)
             # Transient expired or already consumed by an earlier poll —
             # the CLI stops polling (it either got its token once, or the
             # pairing rotted past TTL). Safer to report denied than to
@@ -535,6 +535,7 @@ class AuthRouter:
         row.status = "approved"
         row.user = current_user
         row.token_hash = token_hash
+        row.cli_token_id = hook_row.id
         row.approved_at = now
         db.add(row)
         db.commit()

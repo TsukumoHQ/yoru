@@ -215,6 +215,10 @@ def init_db() -> None:
             }
             if "hostname" not in da_cols:
                 conn.execute(text("ALTER TABLE device_authorizations ADD COLUMN hostname TEXT"))
+            # A.3#3: server-issued CliToken.id, round-tripped to the CLI so
+            # it can key its local identity slot.
+            if "cli_token_id" not in da_cols:
+                conn.execute(text("ALTER TABLE device_authorizations ADD COLUMN cli_token_id TEXT"))
 
         # Multi-tenant tenant key on api_keys (M2). Additive; the table is
         # created by create_all above, so only the ALTER + index need a hand.

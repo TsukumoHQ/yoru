@@ -388,6 +388,11 @@ class DeviceAuthorization(SQLModel, table=True):
     # that's user-overridable via --label, this isn't). Carried through to
     # CliToken.machine_hostname at approve.
     hostname: Optional[str] = Field(default=None, max_length=256)
+    # The server-issued CliToken.id minted at approve — round-tripped to the
+    # CLI on first poll as DeviceCodePollOut.identity_id so it can key its
+    # local identity slot (DEC-yoru-design-ruling-1 Q1: identity_id = the
+    # server's id, never a client-side hash of server_url+email).
+    cli_token_id: Optional[str] = Field(default=None, max_length=64)
     created_at: datetime = Field(default_factory=_utcnow)
     expires_at: datetime = Field(index=True)
     approved_at: Optional[datetime] = None
@@ -698,6 +703,7 @@ class DeviceCodePollIn(SQLModel):
 class DeviceCodePollOut(SQLModel):
     status: str  # pending|approved|expired|denied
     token: Optional[str] = None
+    identity_id: Optional[str] = None
 
 
 class DeviceCodeApproveIn(SQLModel):
