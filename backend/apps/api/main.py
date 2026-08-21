@@ -49,6 +49,7 @@ from apps.api.api.routers.promo.router import PromoRouter
 from apps.api.api.routers.sales.contact import SalesContactRouter
 from apps.api.api.routers.subscriptions.router import SubscriptionsRouter
 from apps.api.api.routers.receipt.auth_router import AuthRouter
+from apps.api.api.routers.receipt.custom_rules_router import CustomRulesRouter
 from apps.api.api.routers.receipt.dashboard_router import DashboardRouter
 from apps.api.api.routers.receipt.db import init_db
 from apps.api.api.routers.receipt.events_router import EventsRouter
@@ -223,6 +224,8 @@ app.include_router(events_router.get_router(), prefix="/api/v1")
 # otherwise be swallowed by `/sessions/{session_id}`.
 export_router = ExportRouter()
 app.include_router(export_router.get_router(), prefix="/api/v1")
+
+app.include_router(CustomRulesRouter().get_router(), prefix="/api/v1")
 
 sessions_router = SessionsRouter()
 app.include_router(sessions_router.get_router(), prefix="/api/v1")

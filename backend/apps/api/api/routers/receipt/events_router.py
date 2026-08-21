@@ -41,6 +41,7 @@ from apps.api.core.logging import get_logger
 from libs.log_manager.controller import LoggingController
 
 from .billing.plan_limits import session_cap_for
+from .custom_rules import get_org_rules, scan_custom
 from .db import get_session
 from .deps import get_current_org, get_current_user
 from .models import (
@@ -517,6 +518,19 @@ class EventsRouter:
                     session.flush()
                 touched[e.session_id] = sess
 
+            # Custom red-flag rules (design trovex:961a5e80, task 569f1d47):
+            # org-scoped, evaluated after the six presets. TTL-cached per org
+            # (custom_rules.get_org_rules) so this doesn't add a query per
+            # event. custom_severity records each hit's user-configured
+            # severity so the EventFlag write below doesn't need to re-query
+            # the rule (severity_of can't derive it from category alone).
+            custom_hits = scan_custom(e, get_org_rules(session, sess.org_id))
+            custom_severity: dict[str, str] = {}
+            for rule_id, sev in custom_hits:
+                if rule_id not in flags:
+                    flags.append(rule_id)
+                custom_severity[rule_id] = sev
+
             # Phase C/W1 — routing: capture cwd/git context on first event of
             # a session and resolve the target workspace via resolve_workspace
             # RPC (workspace_repos → route_rules → personal fallback). Frozen
@@ -651,7 +665,7 @@ class EventsRouter:
                         event_id=ev_row.id,
                         rule_id=rule_id,
                         category=category_of(rule_id),
-                        severity=severity_of(rule_id),
+                        severity=severity_of(rule_id, custom_severity.get(rule_id)),
                         ts=ts,
                         # steal#6: self-explanatory record — freeze the parent
                         # session's git context onto the flag (which repo/branch/

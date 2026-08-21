@@ -131,9 +131,12 @@ def category_of(rule_id: str) -> str:
 
     secret_* -> secret; shell_* -> shell; db_destructive -> db;
     migration_file -> migration; env_mutation -> env; ci_config -> ci.
-    An unrecognized id falls back to "secret" only if it is secret-prefixed,
-    else "shell" is never assumed — unknown ids return "other" so a taxonomy
-    drift surfaces instead of silently miscategorizing.
+    ``custom:*`` -> "custom" — an additive 7th value for org-defined rules
+    (design trovex:961a5e80, task 569f1d47). Do NOT add a preset here for it;
+    the six stay exactly six. An unrecognized id falls back to "secret" only
+    if it is secret-prefixed, else "shell" is never assumed — unknown ids
+    return "other" so a taxonomy drift surfaces instead of silently
+    miscategorizing.
     """
     if rule_id.startswith("secret_"):
         return "secret"
@@ -147,13 +150,24 @@ def category_of(rule_id: str) -> str:
         return "env"
     if rule_id == "ci_config":
         return "ci"
+    if rule_id.startswith("custom:"):
+        return "custom"
     return "other"
 
 
-def severity_of(rule_id: str) -> str:
+def severity_of(rule_id: str, custom_severity: str | None = None) -> str:
     """Coarse audit severity (critical | high | medium) for a rule_id, derived
     from its category. Unknown categories default to "high" so an
-    unclassified signal is never quietly downgraded."""
+    unclassified signal is never quietly downgraded.
+
+    A custom rule's severity is user-configured, not derivable from its
+    category — the caller (events_router, which already has the compiled
+    rule in hand at scan time) passes it via ``custom_severity``. Falls back
+    to "high" if a custom rule_id shows up without one (defensive — should
+    never happen on the real ingest path).
+    """
+    if rule_id.startswith("custom:"):
+        return custom_severity or "high"
     return _CATEGORY_SEVERITY.get(category_of(rule_id), "high")
 
 

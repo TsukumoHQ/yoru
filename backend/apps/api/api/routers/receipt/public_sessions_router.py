@@ -7,11 +7,12 @@ POST /sessions/{id}/share. The endpoint:
   both so callers can't probe private sessions by id).
 - Redacts owner PII (no `user` field on the wire; no `cwd`, `git_remote`,
   or `git_branch`).
-- Redacts the **content** of any event that carries a `secret_*` flag —
-  the structural fact of the flag stays visible (that's the story the
-  viewer came for) but the raw credential does not. Non-secret flagged
-  events (shell_rm, db_destructive, migration_edit, etc.) are returned
-  verbatim because the narrative depends on them.
+- Redacts the **content** of any event that carries a `secret_*` flag OR
+  a `custom:*` flag (org custom rule, design trovex:961a5e80) — the
+  structural fact of the flag stays visible (that's the story the viewer
+  came for) but the raw content does not. Non-secret preset-flagged events
+  (shell_rm, db_destructive, migration_edit, etc.) are returned verbatim
+  because the narrative depends on them.
 - Rate-limited to 60/min per remote IP when `RATELIMIT_ENABLED=1`. Fail-
   open behavior of `limiter` means a Redis outage doesn't take the public
   surface down.
@@ -132,11 +133,21 @@ def _scrub_value(obj):
 
 
 def _is_secret_flag(flag: str) -> bool:
-    """True when this red-flag category carries credential content we must
-    strip before publishing. Anchors the redaction rule in one place so
-    adding a new `secret_*` category (secret_mistral etc.) doesn't require
-    touching the router."""
-    return flag.startswith("secret_")
+    """True when this red-flag category carries content we must strip before
+    publishing. Anchors the redaction rule in one place so adding a new
+    `secret_*` category (secret_mistral etc.) doesn't require touching the
+    router.
+
+    Also true for any org custom rule (`custom:*`, design trovex:961a5e80) —
+    conservative-safe default: a custom rule is by definition content the
+    org's own user decided was worth flagging, and unlike the shell/db/env/ci
+    presets (dangerous *actions*, fine to show in the public narrative) a
+    custom rule has no declared intent here, so it is treated like a secret
+    (redacted) rather than risk leaking exactly the content the user asked
+    yoru to watch for. Whether to distinguish "secret-like" from
+    "dangerous-action-like" custom rules is a v2 question (would need a
+    per-rule flag), not a v1 corner-cut against a real leak."""
+    return flag.startswith("secret_") or flag.startswith("custom:")
 
 
 def _redact_event(ev_out, *, flags: list[str]) -> PublicEventOut:

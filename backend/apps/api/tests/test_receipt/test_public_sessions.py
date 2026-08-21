@@ -247,6 +247,33 @@ def test_public_get_redacts_secret_flagged_event(client, db_session):
     assert edit_event["kind"] == "file_change"
 
 
+def test_public_get_redacts_custom_flagged_event(client, db_session):
+    """custom:* flags (org custom rules, design trovex:961a5e80) get the same
+    content/output/tool_input strip as secret_* — a user's own custom rule is
+    content they decided was sensitive; the public-share path must not leak
+    exactly what they asked yoru to watch for."""
+    _seed_session(db_session, sid="s-custom", user="alice", is_public=True)
+    db_session.add(
+        Event(
+            session_id="s-custom",
+            ts=BASE_TS + timedelta(seconds=1),
+            kind="tool_use",
+            tool="Bash",
+            content="curl internal-api-key-XYZ",
+            flags=["custom:abc123"],
+            raw={"tool_name": "Bash", "tool_input": {"command": "curl internal-api-key-XYZ"}},
+        )
+    )
+    db_session.commit()
+    resp = client.get("/api/v1/public/sessions/s-custom")
+    body = resp.json()
+    ev = body["events"][0]
+    assert ev["flags"] == ["custom:abc123"]
+    assert ev["content"] is None
+    assert ev["output"] is None
+    assert ev["tool_input"] is None
+
+
 def test_public_get_keeps_non_secret_flags_verbatim(client, db_session):
     """shell_rm, db_destructive, etc. are visible with full content — the
     narrative ('Claude tried to rm -rf node_modules') is the whole point."""

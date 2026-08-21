@@ -5,6 +5,7 @@ Contract frozen in vault/BACKEND-API-V0.md §2–§3.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
@@ -188,6 +189,41 @@ class EventFlag(SQLModel, table=True):
     git_branch: Optional[str] = Field(default=None)
     git_remote: Optional[str] = Field(default=None)
     cwd: Optional[str] = Field(default=None)
+
+
+class CustomRule(SQLModel, table=True):
+    """Org-defined red-flag rule (design trovex:961a5e80, task 569f1d47).
+
+    Generalizes the six built-in presets (``red_flags.py``) into a
+    user-editable ruleset, scoped per org (the existing tenant boundary —
+    ``CliToken``/``EventFlag.org_id``; "each user" in the founder brief reads
+    as "each customer org", cto ruling 2026-08-21). A hit is recorded as an
+    ``EventFlag`` with ``category="custom"`` (additive 7th value — the six
+    preset categories are untouched) and ``rule_id="custom:{id}"`` so it can
+    never collide with or be mistaken for a preset id.
+
+    v1 match_type is deliberately narrow: ``contains`` (plain substring) and
+    ``path_glob`` only — both linear-time. ``regex`` is rejected at create
+    time (cto ruling: ReDoS on user-authored patterns against shared ingest
+    infra is a real ticket, not a v1 corner-cut; fast-follow gated on a
+    linear-time engine e.g. google-re2).
+    """
+    __tablename__ = "custom_rules"
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    org_id: str = Field(index=True)
+    name: str
+    enabled: bool = Field(default=True)
+    # Optional narrowing filters — None means "any". kind mirrors EventIn.kind;
+    # tool_filter is a JSON list of tool names (e.g. ["Bash","Shell"]).
+    kind_filter: Optional[str] = Field(default=None)
+    tool_filter: Optional[list[str]] = Field(default=None, sa_column=Column(JSON))
+    match_type: str  # "contains" | "path_glob" — regex rejected at create time (v1)
+    pattern: str = Field(max_length=512)  # create-time length cap (cache-size + cost guard)
+    severity: str  # "critical" | "high" | "medium" — reuses the existing 3-tier enum
+    created_by: str  # user id/email — audits authorship of the rule itself
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
 
 
 class CliToken(SQLModel, table=True):
@@ -836,3 +872,43 @@ class PublicSessionOut(SQLModel):
     summary: Optional[str]
     events: list[PublicEventOut]
     score: Optional[ScoreBreakdown] = None
+
+
+# ---------- Custom red-flag rules (design trovex:961a5e80, task 569f1d47) ---
+
+class CustomRuleIn(SQLModel):
+    """Body for POST /orgs/{org_id}/red-flag-rules."""
+    name: str
+    enabled: bool = True
+    kind_filter: Optional[str] = None
+    tool_filter: Optional[list[str]] = None
+    match_type: str  # "contains" | "path_glob" — validated by custom_rules.validate_rule
+    pattern: str
+    severity: str  # "critical" | "high" | "medium"
+
+
+class CustomRuleUpdate(SQLModel):
+    """Body for PATCH /orgs/{org_id}/red-flag-rules/{rule_id}. Every field
+    optional — omitted fields keep their current value."""
+    name: Optional[str] = None
+    enabled: Optional[bool] = None
+    kind_filter: Optional[str] = None
+    tool_filter: Optional[list[str]] = None
+    match_type: Optional[str] = None
+    pattern: Optional[str] = None
+    severity: Optional[str] = None
+
+
+class CustomRuleOut(SQLModel):
+    id: str
+    org_id: str
+    name: str
+    enabled: bool
+    kind_filter: Optional[str]
+    tool_filter: Optional[list[str]]
+    match_type: str
+    pattern: str
+    severity: str
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
