@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import { formatCost } from "@receipt/ui"
+import { formatCost, isCustomFlag } from "@receipt/ui"
 import { normalizeFlagCounts } from "../../lib/api"
 import type { Session, SessionList, RedFlagKind } from "../../types/receipt"
 
@@ -85,6 +85,21 @@ function rollup(list: SessionList): Totals {
   }
 }
 
+// Fleet-wide rollup spans many sessions (potentially many orgs), so unlike
+// the session-detail badges there's no single org to resolve custom rule
+// NAMES against here — this is a count-only aggregate, not a per-rule label.
+function flagBreakdown(flagsByKind: Map<RedFlagKind, number>): string {
+  const parts = FLAG_ORDER.filter((k) => flagsByKind.get(k)).map(
+    (k) => `${FLAG_LABEL[k]} ${flagsByKind.get(k)}`,
+  )
+  let customTotal = 0
+  for (const [k, n] of flagsByKind) {
+    if (isCustomFlag(k)) customTotal += n
+  }
+  if (customTotal > 0) parts.push(`custom ${customTotal}`)
+  return parts.join(" · ")
+}
+
 export function FleetStats({ list }: { list: SessionList }) {
   const t = useMemo(() => rollup(list), [list])
   if (t.sessions === 0) return null
@@ -118,13 +133,7 @@ export function FleetStats({ list }: { list: SessionList }) {
         <Tile
           label="red flags"
           value={String(t.flagCount)}
-          sub={
-            t.flagCount > 0
-              ? FLAG_ORDER.filter((k) => t.flagsByKind.get(k))
-                  .map((k) => `${FLAG_LABEL[k]} ${t.flagsByKind.get(k)}`)
-                  .join(" · ")
-              : "none"
-          }
+          sub={t.flagCount > 0 ? flagBreakdown(t.flagsByKind) : "none"}
         />
       </dl>
     </section>

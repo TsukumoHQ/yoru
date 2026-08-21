@@ -9,10 +9,12 @@
 // Reads only the events already on the loaded session; no new API, no backend.
 // Human-facing generated phrasing is kept plain and specific (anti-slop).
 import { useCallback, useMemo, useState } from "react"
-import { redactTokens } from "@receipt/ui"
-import type { RedFlagKind, SessionEvent } from "../../types/receipt"
+import { redactTokens, isCustomFlag } from "@receipt/ui"
+import type { CustomRuleInfo, RedFlagKind, SessionEvent } from "../../types/receipt"
 
-const FLAG_LABEL: Record<RedFlagKind, string> = {
+// Presets only — a custom:<uuid> flag is resolved via `customRuleInfo`
+// (short-id fallback below) rather than this closed map.
+const FLAG_LABEL: Partial<Record<RedFlagKind, string>> = {
   "secret-pattern": "secret",
   "shell-destructive": "destructive shell",
   "db-destructive": "destructive db",
@@ -112,7 +114,17 @@ function buildMermaid(steps: Step[], totalSteps: number): { src: string; truncat
   return { src: lines.join("\n"), truncated }
 }
 
-export function CausalReplay({ events }: { events: SessionEvent[] }) {
+interface CausalReplayProps {
+  events: SessionEvent[]
+  /** Name lookup for `custom:<uuid>` flags — see TimelineEvent. */
+  customRuleInfo?: Record<string, CustomRuleInfo>
+}
+
+function shortId(kind: string): string {
+  return kind.slice("custom:".length, "custom:".length + 8)
+}
+
+export function CausalReplay({ events, customRuleInfo }: CausalReplayProps) {
   const total = events.length
   // Describe + redact ONLY the steps we actually render/graph (RENDER_CAP ≥
   // GRAPH_CAP). A session can hold 10^5 events; redacting every one at load
@@ -169,7 +181,9 @@ export function CausalReplay({ events }: { events: SessionEvent[] }) {
                       key={f}
                       className="inline-flex items-center rounded-sm border border-flag-secret/40 bg-flag-secret/5 px-1.5 py-0.5 font-mono text-micro uppercase tracking-wider text-flag-secret"
                     >
-                      {FLAG_LABEL[f] ?? f}
+                      {isCustomFlag(f)
+                        ? (customRuleInfo?.[f]?.name ?? `custom: ${shortId(f)}`)
+                        : (FLAG_LABEL[f] ?? f)}
                     </span>
                   ))}
                 </p>

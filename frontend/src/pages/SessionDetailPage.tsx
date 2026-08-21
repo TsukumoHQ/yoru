@@ -77,7 +77,7 @@ function Receipt({ session }: { session: SessionDetail }) {
         {/* Steal #4 — the run as plain-English causal steps + a copyable run
             graph, for a compliance officer reading the trail (not a flat log).
             Derived from the recorded event order; reads only loaded events. */}
-        <CausalReplay events={session.events ?? []} />
+        <CausalReplay events={session.events ?? []} customRuleInfo={customRuleInfo} />
         {/* TSU-55 follow-up — live step-through replay (authed dashboard only;
             owner-side, not the dormant public viewer). Renders above the full
             timeline so you can scrub the run, then read the detail below. */}
