@@ -20,6 +20,7 @@ import { ProfilePage } from "./pages/ProfilePage"
 import { RoutingPage } from "./pages/RoutingPage"
 import { TokensPage } from "./pages/TokensPage"
 import { UsagePage } from "./pages/UsagePage"
+import { OrgIdentitiesPage } from "./pages/OrgIdentitiesPage"
 import { WorkspacesPage } from "./pages/WorkspacesPage"
 import { SessionDetailPage } from "./pages/SessionDetailPage"
 import { SessionsListPage } from "./pages/SessionsListPage"
@@ -61,6 +62,7 @@ const router = createBrowserRouter([
       { path: "/settings/teams", element: <TeamsPage />, errorElement: <ErrorPage /> },
       { path: "/settings/tokens", element: <TokensPage />, errorElement: <ErrorPage /> },
     { path: "/settings/usage", element: <UsagePage />, errorElement: <ErrorPage /> },
+    { path: "/org/identities", element: <OrgIdentitiesPage />, errorElement: <ErrorPage /> },
       { path: "/settings/routing", element: <RoutingPage />, errorElement: <ErrorPage /> },
       { path: "/settings/workspaces", element: <WorkspacesPage />, errorElement: <ErrorPage /> },
       { path: "/integrations/github/callback", element: <GithubCallbackPage />, errorElement: <ErrorPage /> },

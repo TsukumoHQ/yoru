@@ -17,6 +17,7 @@ const NAV: NavItem[] = [
   { to: "/settings/teams",          label: "/teams" },
   { to: "/settings/tokens",         label: "/tokens" },
   { to: "/settings/usage",          label: "/usage" },
+  { to: "/org/identities",          label: "/identities" },
   { to: "/settings/billing",        label: "/billing", billingOnly: true },
   { to: "/settings/profile",        label: "/profile" },
 ]

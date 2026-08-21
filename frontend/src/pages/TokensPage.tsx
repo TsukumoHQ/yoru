@@ -12,6 +12,7 @@ import {
   type ServiceTokenItem,
   type UserTokenItem,
 } from "../lib/api"
+import { deviceUrgency, idleDays, URGENCY_RANK } from "../lib/device-urgency"
 import { toast } from "../components/Toaster"
 
 // Two tabs open on the same token list can both fire a revoke for the same
@@ -79,26 +80,10 @@ function tokenLabel(label: string | null | undefined): string {
 // needs a look — a wall of "used 4h ago" rows chronologically isn't. Revoked
 // rows carry no forward-looking urgency, so they're excluded from this and
 // kept in their own chronological tail (see `visibleMyTokens` below).
-const STALE_DAYS = 30
-const DAY_MS = 86_400_000
-
-type DeviceUrgency = "never-used" | "stale" | "active"
-
-function deviceUrgency(t: UserTokenItem): DeviceUrgency {
-  if (!t.last_used_at) return "never-used"
-  const idleDays = (Date.now() - new Date(t.last_used_at).getTime()) / DAY_MS
-  return idleDays >= STALE_DAYS ? "stale" : "active"
-}
-
-const URGENCY_RANK: Record<DeviceUrgency, number> = {
-  "never-used": 0,
-  stale: 1,
-  active: 2,
-}
-
 function sortByUrgency(tokens: UserTokenItem[]): UserTokenItem[] {
   return tokens.slice().sort((a, b) => {
-    const rankDiff = URGENCY_RANK[deviceUrgency(a)] - URGENCY_RANK[deviceUrgency(b)]
+    const rankDiff =
+      URGENCY_RANK[deviceUrgency(a.last_used_at)] - URGENCY_RANK[deviceUrgency(b.last_used_at)]
     if (rankDiff !== 0) return rankDiff
     // Same urgency tier: the one quiet longest needs attention soonest.
     const aTime = new Date(a.last_used_at ?? a.created_at).getTime()
@@ -355,12 +340,9 @@ function TokenList({
 }
 
 function DeviceUrgencyBadge({ token }: { token: UserTokenItem }) {
-  const urgency = deviceUrgency(token)
+  const urgency = deviceUrgency(token.last_used_at)
   if (urgency === "active") return null
-  const label =
-    urgency === "never-used"
-      ? "never used"
-      : `inactive ${Math.floor((Date.now() - new Date(token.last_used_at!).getTime()) / DAY_MS)}d`
+  const label = urgency === "never-used" ? "never used" : `inactive ${idleDays(token.last_used_at!)}d`
   return (
     <span className="rounded-sm bg-flag-migration/10 px-1.5 py-0.5 font-mono text-micro uppercase tracking-wider text-flag-migration">
       {label}

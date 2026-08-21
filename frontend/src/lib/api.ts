@@ -704,6 +704,27 @@ export async function revokeServiceToken(id: string): Promise<void> {
   await apiFetch<void>(`/auth/service-token/${id}`, { method: "DELETE" })
 }
 
+// ───── Org-wide connected identities (CTO view, 22f98e0a) ─────
+// Cross-user: every paired device in `orgId`, not just the caller's own —
+// role-gated server-side (require_org_admin, 403 for a non-admin caller).
+// Deliberately a separate DTO from UserTokenItem (see OrgIdentityItem's
+// backend docstring): this one always carries the owning user's email.
+
+export interface OrgIdentityItem {
+  org_id: string
+  user: string
+  id: string
+  identity_label?: string | null
+  machine_hostname?: string | null
+  created_at: string
+  last_used_at?: string | null
+  status: "active" | "expired" | "revoked"
+}
+
+export function getOrgIdentities(orgId: string): Promise<OrgIdentityItem[]> {
+  return apiFetch<OrgIdentityItem[]>(`/auth/org/identities?org_id=${encodeURIComponent(orgId)}`)
+}
+
 // ───── Workspaces (Phase W2) ─────
 
 export interface Workspace {
