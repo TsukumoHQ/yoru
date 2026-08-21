@@ -288,6 +288,66 @@ def test_detail_happy_path(client, db_session, alice_headers):
     assert body["events"][0]["flags"] == ["shell_rm"]
 
 
+# ---------- session-level agent_confidence / enforce_available (B3 slice2.5) ----------
+
+def test_detail_adapter_only_session_is_declared(client, db_session, alice_headers):
+    db_session.add(SessionRow(id="conf-adapter", user="alice", started_at=BASE_TS))
+    db_session.add(Event(
+        session_id="conf-adapter", ts=BASE_TS,
+        kind="tool_use", tool="Bash", content="ls", flags=[],
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/v1/sessions/conf-adapter", headers=alice_headers)
+    body = resp.json()
+    assert body["agent_confidence"] == "declared"
+    assert body["enforce_available"] is True
+
+
+def test_detail_independent_only_session_is_unknown(client, db_session, alice_headers):
+    db_session.add(SessionRow(id="conf-git", user="alice", started_at=BASE_TS))
+    db_session.add(Event(
+        session_id="conf-git", ts=BASE_TS,
+        kind="commit", content="fix: bug", flags=[],
+        raw={"source": "independent:git", "diff_unified": None, "diff_stat": None, "force_push": False},
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/v1/sessions/conf-git", headers=alice_headers)
+    body = resp.json()
+    assert body["agent_confidence"] == "unknown"
+    assert body["enforce_available"] is False
+
+
+def test_detail_mixed_session_is_declared(client, db_session, alice_headers):
+    db_session.add(SessionRow(id="conf-mixed", user="alice", started_at=BASE_TS))
+    db_session.add(Event(
+        session_id="conf-mixed", ts=BASE_TS,
+        kind="commit", content="fix: bug", flags=[],
+        raw={"source": "independent:git"},
+    ))
+    db_session.add(Event(
+        session_id="conf-mixed", ts=BASE_TS + timedelta(seconds=1),
+        kind="tool_use", tool="Edit", content="evt", flags=[],
+    ))
+    db_session.commit()
+
+    resp = client.get("/api/v1/sessions/conf-mixed", headers=alice_headers)
+    body = resp.json()
+    assert body["agent_confidence"] == "declared"
+    assert body["enforce_available"] is True
+
+
+def test_detail_zero_events_session_defaults_unknown(client, db_session, alice_headers):
+    db_session.add(SessionRow(id="conf-empty", user="alice", started_at=BASE_TS))
+    db_session.commit()
+
+    resp = client.get("/api/v1/sessions/conf-empty", headers=alice_headers)
+    body = resp.json()
+    assert body["agent_confidence"] == "unknown"
+    assert body["enforce_available"] is False
+
+
 def test_detail_404_on_unknown_id(client, alice_headers):
     resp = client.get("/api/v1/sessions/does-not-exist", headers=alice_headers)
     assert resp.status_code == 404

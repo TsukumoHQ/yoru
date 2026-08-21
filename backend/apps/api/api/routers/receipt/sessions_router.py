@@ -114,6 +114,34 @@ def _count_lines(s: str | None) -> int:
     return s.count("\n") + (1 if s and not s.endswith("\n") else 0)
 
 
+def _aggregate_agent_confidence(events: list[Event]) -> tuple[str, bool]:
+    """Session-level rollup of CanonicalEvent.agent_confidence (B3 slice2.5).
+
+    An event's `raw["source"] == "independent:git"` marker (set at ingest,
+    events_router.py, for the B3 git capture floor) is the reliable
+    per-event discriminator — NOT `kind`, since kind alone can't
+    distinguish an independent-capture event from an adapter one (e.g. a
+    force-push event's kind is generic, not a git-specific value). An event
+    WITHOUT that marker is adapter-origin (the CC tailer never sets it —
+    matches `to_canonical_event`'s own default branch).
+
+    "declared" the moment ANY event is adapter-origin, even in an otherwise
+    independent-heavy session (AC: "session mixte -> declared") — one real
+    per-event intent signal is enough to call the session's provenance
+    known. `enforce_available` is exactly `agent_confidence == "declared"`
+    (ruling DEC-yoru-b3-capture-ruling-1 point 5: enforce is adapter-gated,
+    independent-only sessions are audit-only, never silently offered a
+    toggle that can't work).
+    """
+    has_adapter_event = any(
+        not (isinstance(e.raw, dict) and e.raw.get("source") == "independent:git")
+        for e in events
+    )
+    if has_adapter_event:
+        return "declared", True
+    return "unknown", False
+
+
 def _summarize_files_changed(events_asc: list[Event]) -> list[FileChangedOut]:
     """Aggregate file-change events into one FileChangedOut per path.
 
@@ -574,6 +602,7 @@ class SessionsRouter:
 
         events_out = _enrich_events(events_asc)
         files_out = _summarize_files_changed(events_asc)
+        agent_confidence, enforce_available = _aggregate_agent_confidence(events_asc)
 
         # Compute score from the event stream + row aggregates. Derives
         # tool_call_count + error_count from the events; the rest from
@@ -601,6 +630,8 @@ class SessionsRouter:
                 "files_changed": files_out,
                 "events": events_out,
                 "score": score_out,
+                "agent_confidence": agent_confidence,
+                "enforce_available": enforce_available,
             }
         )
 

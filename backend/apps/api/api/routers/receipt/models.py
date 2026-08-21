@@ -648,6 +648,19 @@ class SessionDetail(SessionListItem):
     summary: Optional[str]
     events: list[EventOut]
     score: Optional[ScoreBreakdown] = None
+    # B3 slice2.5 — session-level rollup of CanonicalEvent.agent_confidence
+    # (per-event, computed on the fly, never persisted) so the dashboard can
+    # render an audit-only badge without walking the event stream itself.
+    # "declared" if ANY event in the session came from an adapter (CC
+    # tailer) — a session with even one adapter event has real per-event
+    # intent signal; "unknown" only when every event is independent-capture
+    # (git-only, no CC hook ever ran here). Additive, defaults preserve the
+    # existing schema for any caller that doesn't know about it yet.
+    agent_confidence: str = "unknown"
+    # True only when agent_confidence=="declared" — enforce (pre-execution
+    # blocking) has no independent-only equivalent (ruling
+    # DEC-yoru-b3-capture-ruling-1 point 5: enforce is adapter-gated).
+    enforce_available: bool = False
 
 
 # ---------- Trail export (§4.6) ----------
