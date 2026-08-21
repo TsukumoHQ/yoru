@@ -680,6 +680,22 @@ class HookTokenListItem(SQLModel):
     revoked_at: Optional[datetime]
 
 
+class OrgIdentityItem(SQLModel):
+    """One connected dev identity (CliToken row), for the CTO org-wide view
+    (22f98e0a). Not a `HookTokenListItem` extension — deliberately a
+    separate DTO: `HookTokenListItem` is the self-scoped shape (no owner,
+    no org_id — a leak risk if reused for a cross-user response), this one
+    is explicitly cross-user and always carries who it belongs to."""
+    org_id: str
+    user: str  # the identity's owner email — CliToken.user
+    id: str
+    identity_label: Optional[str] = None
+    machine_hostname: Optional[str] = None
+    created_at: datetime
+    last_used_at: Optional[datetime] = None
+    status: Literal["active", "expired", "revoked"]
+
+
 # ---------- Device-code pairing (receipt init) ----------
 
 class DeviceCodeStartIn(SQLModel):

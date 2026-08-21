@@ -24,7 +24,7 @@ import uuid
 from datetime import UTC, timedelta
 
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import update as sa_update
 from sqlmodel import Session as DBSession
@@ -32,6 +32,7 @@ from sqlmodel import select
 
 from apps.api.api.dependencies.auth import SESSION_COOKIE_NAME
 from apps.api.api.services.auth.provider import get_auth_provider
+from libs.datastore import get_data_store
 
 from .auth_sessions_model import AuthSession
 from .db import get_session
@@ -54,6 +55,7 @@ from .models import (
     HookTokenListItem,
     HookTokenMintIn,
     HookTokenMintOut,
+    OrgIdentityItem,
     PasswordResetConfirmIn,
     PasswordResetConfirmOut,
     PasswordResetRequestIn,
@@ -168,6 +170,26 @@ def org_default_workspace_id(org_id: str) -> str:
     if not rows:
         raise HTTPException(status_code=404, detail="organization has no default workspace")
     return rows[0]["id"]
+
+
+def _org_member_emails(store, org_id: str) -> set[str]:
+    """Emails of every `organization_members` row for `org_id`, resolved
+    via `profiles` — same two-table join pattern as
+    `visibility.py::_co_member_user_ids`/`visible_emails`, just keyed by
+    org instead of by co-membership. Used by `list_org_identities`
+    (22f98e0a) to turn an org_id into the set of CliToken.user values that
+    belong to it (CliToken carries no reliable org_id of its own for
+    user-type tokens — see CliToken's own docstring)."""
+    rows = store.query_records("organization_members", filters={"org_id": org_id})
+    emails: set[str] = set()
+    for r in rows:
+        uid = r.get("user_id")
+        if not uid:
+            continue
+        prof = store.get_record("profiles", uid)
+        if prof and prof.get("email"):
+            emails.add(prof["email"])
+    return emails
 
 
 def require_dashboard_jwt(request: Request) -> str:
@@ -321,6 +343,10 @@ class AuthRouter:
             status_code=status.HTTP_204_NO_CONTENT,
             response_model=None,
         )(self.revoke_token)
+        self.router.get(
+            "/org/identities",
+            response_model=list[OrgIdentityItem],
+        )(self.list_org_identities)
         self.router.post(
             "/api-keys",
             response_model=ApiKeyCreateOut,
@@ -645,6 +671,63 @@ class AuthRouter:
             .order_by(CliToken.created_at.desc())
         ).all()
         return [HookTokenListItem.model_validate(r.model_dump()) for r in rows]
+
+    def list_org_identities(
+        self,
+        request: Request,
+        org_id: str = Query(...),
+        db: DBSession = Depends(get_session),
+    ) -> list[OrgIdentityItem]:
+        """Org-wide connected-identity list for the CTO view (22f98e0a).
+
+        Role-gated via `require_org_admin` — self-host: any authenticated
+        dashboard user; cloud: org owner/admin, or a studio super-admin
+        (DEC-yoru-rbac-ruling-1 Q1). Reuses the existing gate verbatim, no
+        new authz primitive. Never satisfiable via a CliToken bearer —
+        `require_org_admin` → `require_dashboard_jwt` reads the dashboard
+        session cookie exclusively, same invariant as 9be89019/5a72353b.
+        """
+        require_org_admin(request, org_id)
+
+        if _is_local_auth():
+            # Self-host is single-tenant — there is no real org model, so
+            # "the org" is the whole instance (the same posture
+            # require_org_admin itself already takes here). Every user-type
+            # identity in the local DB counts as "in this org"; CliToken.org_id
+            # is NULL for user tokens today regardless (see CliToken's own
+            # docstring), so filtering on it would just return nothing.
+            member_emails: Optional[set[str]] = None
+        else:
+            member_emails = _org_member_emails(get_data_store(), org_id)
+            if not member_emails:
+                return []
+
+        stmt = select(CliToken).where(CliToken.token_type != "service")
+        if member_emails is not None:
+            stmt = stmt.where(CliToken.user.in_(member_emails))
+        stmt = stmt.order_by(CliToken.created_at.desc())
+        rows = db.exec(stmt).all()
+
+        now = _naive_utc_now()
+        items: list[OrgIdentityItem] = []
+        for r in rows:
+            if r.revoked_at is not None:
+                row_status = "revoked"
+            elif r.expires_at is not None and r.expires_at < now:
+                row_status = "expired"
+            else:
+                row_status = "active"
+            items.append(OrgIdentityItem(
+                org_id=org_id,
+                user=r.user,
+                id=r.id,
+                identity_label=r.identity_label,
+                machine_hostname=r.machine_hostname,
+                created_at=r.created_at,
+                last_used_at=r.last_used_at,
+                status=row_status,
+            ))
+        return items
 
     def revoke_token(
         self,
