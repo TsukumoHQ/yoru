@@ -1,12 +1,84 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { apiFetch } from "../lib/api"
+import { apiFetch, ApiError } from "../lib/api"
+
+// Distinct failure reasons the backend's /device-code/approve can produce
+// (auth_router.py device_code_approve): 404 unknown code, 410 expired,
+// 409 code already in a non-pending status (approved/consumed/denied — i.e.
+// already paired), 429 reserved for when rate-limiting re-lands (issue #54,
+// currently unreachable but handled so the UI doesn't need a follow-up
+// change once it does). Anything else is "unknown" — a real, unclassified
+// failure (network down, 5xx) whose raw message is still worth showing.
+type ErrorReason = "invalid" | "expired" | "already-paired" | "rate-limited" | "unknown"
 
 type State =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "success"; code: string }
-  | { kind: "error"; message: string }
+  | { kind: "error"; reason: ErrorReason; message: string }
+
+const ERROR_COPY: Record<ErrorReason, { headline: string; hint: React.ReactNode }> = {
+  invalid: {
+    headline: "That code doesn't match a pending pairing.",
+    hint: (
+      <>
+        Double-check the code your terminal printed, or run{" "}
+        <code className="font-mono text-ink">yoru init</code> again to get a new one.
+      </>
+    ),
+  },
+  expired: {
+    headline: "This code has expired.",
+    hint: (
+      <>
+        Code may be expired. Re-run <code className="font-mono text-ink">yoru init</code> and
+        try again.
+      </>
+    ),
+  },
+  "already-paired": {
+    headline: "This code was already used to pair a device.",
+    hint: (
+      <>
+        If that wasn't you, revoke it from{" "}
+        <Link
+          to="/settings/tokens"
+          className="text-accent-600 underline-offset-2 hover:text-accent-500 hover:underline"
+        >
+          Settings → Tokens
+        </Link>
+        .
+      </>
+    ),
+  },
+  "rate-limited": {
+    headline: "Too many attempts.",
+    hint: "Wait a moment, then try again.",
+  },
+  unknown: {
+    headline: "",
+    hint: null,
+  },
+}
+
+function classifyError(err: unknown): { reason: ErrorReason; message: string } {
+  if (err instanceof ApiError) {
+    switch (err.status) {
+      case 404:
+        return { reason: "invalid", message: ERROR_COPY.invalid.headline }
+      case 410:
+        return { reason: "expired", message: ERROR_COPY.expired.headline }
+      case 409:
+        return { reason: "already-paired", message: ERROR_COPY["already-paired"].headline }
+      case 429:
+        return { reason: "rate-limited", message: ERROR_COPY["rate-limited"].headline }
+    }
+  }
+  return {
+    reason: "unknown",
+    message: err instanceof Error ? err.message : "Could not authorize",
+  }
+}
 
 function formatCode(raw: string): string {
   const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "")
@@ -67,8 +139,7 @@ export function PairCliPage() {
       })
       setState({ kind: "success", code })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Could not authorize"
-      setState({ kind: "error", message: msg })
+      setState({ kind: "error", ...classifyError(err) })
     }
   }
 
@@ -169,13 +240,15 @@ export function PairCliPage() {
                 <div
                   role="alert"
                   aria-live="polite"
+                  data-error-reason={state.reason}
                   className="border-l-2 border-flag-env bg-flag-env/5 px-3 py-2 text-sm text-ink"
                 >
                   <span className="font-mono text-ink-muted">[ERR]</span> {state.message}
-                  <p className="mt-1 font-mono text-micro text-ink-faint">
-                    Code may be expired. Re-run{" "}
-                    <code className="font-mono text-ink">yoru init</code> and try again.
-                  </p>
+                  {ERROR_COPY[state.reason].hint && (
+                    <p className="mt-1 font-mono text-micro text-ink-faint">
+                      {ERROR_COPY[state.reason].hint}
+                    </p>
+                  )}
                 </div>
               )}
             </form>
