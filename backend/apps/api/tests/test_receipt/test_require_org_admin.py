@@ -123,3 +123,25 @@ def test_no_session_cookie_401():
     with pytest.raises(HTTPException) as exc:
         ar.require_org_admin(req, _ORG_ID)
     assert exc.value.status_code == 401
+
+
+def test_cli_bearer_token_alone_never_authorizes_org_admin(monkeypatch):
+    """The CliToken-never-implies-a-role invariant (bdb6fe9d, review-
+    backend-api §2): a CliToken presented the normal ingest way (an
+    Authorization: Bearer header) carries no session cookie, so it can
+    never reach past `require_dashboard_jwt` — org-wide/admin actions stay
+    dashboard-cookie-only regardless of what the bearer token could
+    otherwise authenticate elsewhere (e.g. event ingest)."""
+    # Even with a Supabase manager that WOULD authorize this caller as
+    # super-admin, the missing session cookie must still 401 first —
+    # proves the gate is cookie-presence-gated, not identity-gated.
+    _patch_manager(monkeypatch, profiles=[{"id": _CALLER_ID, "role": "admin"}])
+    req = Request(
+        {
+            "type": "http",
+            "headers": [(b"authorization", b"Bearer rcpt_some_cli_token")],
+        }
+    )
+    with pytest.raises(HTTPException) as exc:
+        ar.require_org_admin(req, _ORG_ID)
+    assert exc.value.status_code == 401

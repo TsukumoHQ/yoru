@@ -8,6 +8,17 @@ everything. This gives team sharing *and* a confidentiality wall between groups
 
 `None` returned from the resolvers means "no restriction" (admin / sees all).
 A returned set means "restrict to exactly these owners".
+
+Two sanctioned authz primitives, two different questions (DEC-yoru-rbac-
+ruling-1, design 325e07f9, review-backend-api §2). Don't add a third:
+  - THIS module (`visible_scope_sync`/`visible_emails_sync`) = "which ROWS
+    can this caller see" — the per-row read-scoping SSOT, used by every
+    session/event/export list-and-detail route.
+  - `require_org_admin` (`auth_router.py`) = "may this caller run this
+    org-wide aggregate/admin ACTION at all" — a binary gate, not a scope.
+A new org-wide or admin route reuses one of these two; if it returns
+per-row data, it's a visibility question, if it's an all-or-nothing gate on
+an aggregate/admin endpoint, it's a `require_org_admin` question.
 """
 from __future__ import annotations
 

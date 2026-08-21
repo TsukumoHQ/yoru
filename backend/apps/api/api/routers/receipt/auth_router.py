@@ -210,6 +210,23 @@ def require_dashboard_jwt(request: Request) -> str:
 def require_org_admin(request: Request, org_id: str) -> str:
     """Authorize an org-admin action. Returns the caller's email.
 
+    One of yoru's two sanctioned authz primitives (DEC-yoru-rbac-ruling-1,
+    design 325e07f9, review-backend-api §2) — this one answers "may this
+    caller run this org-wide aggregate/admin action at all" (a binary
+    gate). The OTHER primitive, `visible_scope_sync`/`visible_emails_sync`
+    (`services/access/visibility.py`), answers a different question —
+    "which rows can this caller see" (per-row read-scoping). A new
+    org-wide/admin route reuses one of these two, never a third hand-rolled
+    check.
+
+    Invariant: a `CliToken` bearer can NEVER reach this gate — it goes
+    through `require_dashboard_jwt` first, which explicitly rejects CLI
+    bearer tokens. `CliToken` carries an identity (which user/machine),
+    never a role; a hook token is designed to live in a CI env var or a
+    dev's `~/.config`, and must never be able to escalate to admin power by
+    itself. Cloud-side, this gate is (dashboard-session) + (org owner/admin
+    membership OR studio super-admin) — never (CliToken) + anything.
+
     Self-host (AUTH_PROVIDER=local): single-tenant, no org model. Per the
     README ("the first registered user becomes the admin"), any
     authenticated dashboard user is authorized — validate the session via
