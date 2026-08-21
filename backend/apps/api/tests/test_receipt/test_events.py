@@ -110,6 +110,76 @@ def test_flag_propagation_aws_key(client: TestClient, engine, ingest_headers) ->
     assert "secret_aws" in sess.flags
 
 
+def test_independent_git_commit_ingests_and_folds_diff_into_raw(
+    client: TestClient, engine, ingest_headers
+) -> None:
+    events = [
+        _event(
+            session_id="s-git",
+            kind="commit",
+            tool=None,
+            content="fix: bug",
+            source="independent:git",
+            diff_unified="+print(1)",
+            diff_stat="1 file changed, 1 insertion(+)",
+        )
+    ]
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["accepted"] == 1
+
+    with DBSession(engine) as s:
+        sess = s.get(SessionRow, "s-git")
+        ev = s.exec(select(Event).where(Event.session_id == "s-git")).one()
+    assert sess is not None
+    assert sess.flagged is False
+    assert ev.kind == "commit"
+    assert ev.raw == {
+        "source": "independent:git",
+        "diff_unified": "+print(1)",
+        "diff_stat": "1 file changed, 1 insertion(+)",
+        "force_push": False,
+    }
+
+
+def test_independent_git_commit_secret_in_diff_flags_session(
+    client: TestClient, engine, ingest_headers
+) -> None:
+    events = [
+        _event(
+            session_id="s-git-leak",
+            kind="commit",
+            tool=None,
+            content="chore: oops",
+            source="independent:git",
+            diff_unified="+AWS_KEY=AKIAIOSFODNN7EXAMPLE",
+        )
+    ]
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
+    assert resp.status_code == 202
+    assert resp.json()["flagged_sessions"] == ["s-git-leak"]
+
+    with DBSession(engine) as s:
+        sess = s.get(SessionRow, "s-git-leak")
+    assert sess is not None
+    assert "secret_aws" in sess.flags
+
+
+def test_independent_git_oversized_diff_rejected_422(client: TestClient, ingest_headers) -> None:
+    events = [
+        _event(
+            session_id="s-huge",
+            kind="commit",
+            tool=None,
+            content="chore: huge",
+            source="independent:git",
+            diff_unified="x" * 210_001,
+        )
+    ]
+    resp = client.post("/api/v1/sessions/events", json={"events": events}, headers=ingest_headers)
+    assert resp.status_code == 422
+
+
 def test_file_change_aggregates_and_dedupes(client: TestClient, engine, ingest_headers) -> None:
     events = [
         _event(session_id="s-f", kind="file_change", tool=None, path="a.py"),

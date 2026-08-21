@@ -222,6 +222,11 @@ def scan_canonical_event(canonical: "CanonicalEvent", *, raw: dict | None = None
             flags.append(rule_id)
 
     content = canonical.content_ref or ""
+    # A populated `diff.unified_diff` (git capture, B3 slice1 — trovex:4e85331d
+    # §D.4) is scanned by the exact same secret_* patterns as `content_ref` —
+    # same rule, a second text source, not a new rule. Any future adapter
+    # that fills `diff` gets this scan for free too.
+    diff_text = canonical.diff.unified_diff if canonical.diff else None
     # Scan everything in `raw` EXCEPT `tool_response` — reading a file that
     # mentions a secret pattern is not exfiltration, it's discovery. That's
     # the only silently-skipped data source; the scanner is otherwise strict.
@@ -233,7 +238,11 @@ def scan_canonical_event(canonical: "CanonicalEvent", *, raw: dict | None = None
     raw_blob = json.dumps(raw_minus_response) if raw_minus_response else ""
 
     for rule_id, pattern in _SECRET_PATTERNS.items():
-        if pattern.search(content) or (raw_blob and pattern.search(raw_blob)):
+        if (
+            pattern.search(content)
+            or (diff_text and pattern.search(diff_text))
+            or (raw_blob and pattern.search(raw_blob))
+        ):
             _add(rule_id)
 
     tool_name = canonical.tool.name if canonical.tool else None

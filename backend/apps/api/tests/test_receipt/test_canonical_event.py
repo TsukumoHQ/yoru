@@ -124,6 +124,51 @@ def test_unknown_agent_kind_and_inferred_confidence_are_valid():
     )
 
 
+# ---------- independent git capture floor (B3 slice1, trovex:4e85331d §D) ----------
+
+def test_independent_git_commit_maps_to_commit_action_and_diff():
+    e = _ev(
+        kind="commit",
+        source="independent:git",
+        content="fix: thing",
+        diff_unified="+secret\n-old",
+        diff_stat="1 file changed",
+    )
+    c = to_canonical_event(e)
+    assert c.action == "commit"
+    assert c.source == "independent:git"
+    assert c.agent_kind == "unknown"
+    assert c.agent_confidence == "unknown"
+    assert c.tool is None
+    assert c.artifact is None
+    assert c.diff.unified_diff == "+secret\n-old"
+    assert c.diff.stat == "1 file changed"
+    assert c.content_ref == "fix: thing"
+
+
+def test_independent_git_force_push_has_no_diff_and_unknown_action():
+    e = _ev(kind=None, source="independent:git", content="force-push on main", force_push=True)
+    c = to_canonical_event(e)
+    assert c.action == "unknown"
+    assert c.diff is None
+
+
+def test_secret_in_git_diff_triggers_same_rule_as_secret_in_tool_input():
+    e = _ev(
+        kind="commit",
+        source="independent:git",
+        content="chore: oops",
+        diff_unified="+AWS_KEY=AKIAIOSFODNN7EXAMPLE",
+    )
+    assert "secret_aws" in scan_event(e)
+    assert "secret_aws" in scan_canonical_event(to_canonical_event(e), raw=e.raw)
+
+
+def test_no_secret_in_git_diff_no_flag():
+    e = _ev(kind="commit", source="independent:git", content="chore: cleanup", diff_unified="+print('ok')")
+    assert scan_event(e) == []
+
+
 def test_future_schema_version_does_not_hard_fail():
     # A backend ahead of an old CLI must branch on schema_version, never
     # crash constructing/parsing it — schema_version is a plain str, not a

@@ -504,6 +504,19 @@ class EventsRouter:
 
             flags = scan_event(e)
 
+            # Independent git capture (B3 slice1) has no `raw` blob the way
+            # a CC hook event does — fold its diff/stat/force-push fields
+            # into `raw` for storage so the trail retains them without a
+            # new Event table column (review-backend-api §5: no migration
+            # runner, an additive JSON field is the additive-safe path).
+            if e.source == "independent:git" and e.raw is None:
+                e.raw = {
+                    "source": e.source,
+                    "diff_unified": e.diff_unified,
+                    "diff_stat": e.diff_stat,
+                    "force_push": e.force_push,
+                }
+
             sess = touched.get(e.session_id)
             if sess is None:
                 sess = session.get(SessionRow, e.session_id)

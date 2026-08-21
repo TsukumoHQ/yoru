@@ -20,6 +20,7 @@ EventKind = Literal[
     "message",          # UserPromptSubmit / Notification / SubagentStop — human-facing text
     "session_start",
     "session_end",
+    "commit",           # independent git capture floor (B3 slice1) — a git commit, agent-blind
 ]
 
 
@@ -478,6 +479,23 @@ class EventIn(SQLModel):
     # Transcript dedup key (tailer-origin events). When present, the backend
     # skips re-inserting an (session_id, entry_uuid) it already has.
     entry_uuid: Optional[str] = None
+    # Independent git capture floor (B3 slice1, trovex:4e85331d §D). `source`
+    # discriminates the event's capture path: None/absent = the existing
+    # Claude-Code-shaped hook/tailer contract (unchanged, fully backward
+    # compatible); "independent:git" = the git post-commit/pre-push hooks,
+    # which populate `diff_unified`/`diff_stat`/`force_push` instead of
+    # `tool`/`raw`. `content` doubles as the commit message on a "commit"
+    # kind event (same field the CC path already uses generically for
+    # human-readable text).
+    source: Optional[str] = None
+    # Bounded (review-backend-api §6: a new large free-text ingest field
+    # needs an explicit max_length) — a bit above the CLI's own 200_000-char
+    # cap (git_hook_run.py `_MAX_DIFF_CHARS`) so a compliant client's capped
+    # payload always validates; a hostile/buggy caller still can't push an
+    # arbitrarily large diff through per-field.
+    diff_unified: Optional[str] = Field(default=None, max_length=210_000)
+    diff_stat: Optional[str] = Field(default=None, max_length=8_000)
+    force_push: bool = False
 
     @model_validator(mode="before")
     @classmethod
