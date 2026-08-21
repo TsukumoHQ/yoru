@@ -868,6 +868,44 @@ class TokenAnalyticsOut(SQLModel):
     org: Optional[TokenAnalyticsOrgScope] = None
 
 
+# ---------- Exceptions (red-flag) analytics (5a72353b) ----------
+# CTO-view counterpart to the token-analytics endpoint above: same own/org
+# authz shape (own always permitted, org-wide behind require_org_admin), but
+# rolling up EventFlag (the queryable red-flag index) instead of tokens.
+
+class ExceptionAnalyticsRuleCount(SQLModel):
+    rule_id: str
+    count: int
+
+
+class ExceptionAnalyticsOffender(SQLModel):
+    user: str
+    flag_count: int
+    flagged_sessions: int
+
+
+class ExceptionAnalyticsTotals(SQLModel):
+    flagged_sessions: int
+    total_flags: int
+
+
+class ExceptionAnalyticsScope(SQLModel):
+    totals: ExceptionAnalyticsTotals
+    top_rule_ids: list[ExceptionAnalyticsRuleCount]
+
+
+class ExceptionAnalyticsOrgScope(ExceptionAnalyticsScope):
+    top_offenders: list[ExceptionAnalyticsOffender]
+
+
+class ExceptionAnalyticsOut(SQLModel):
+    since: datetime
+    until: datetime
+    own: ExceptionAnalyticsScope
+    # None unless `org_id` was requested AND the caller passed the admin gate.
+    org: Optional[ExceptionAnalyticsOrgScope] = None
+
+
 # ---------- Public share (#79) ----------
 
 class ShareIn(SQLModel):

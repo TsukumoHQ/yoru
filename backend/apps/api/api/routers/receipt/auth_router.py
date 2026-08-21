@@ -194,7 +194,12 @@ def require_org_admin(request: Request, org_id: str) -> str:
     the local auth provider; authenticated == authorized.
 
     Cloud (AUTH_PROVIDER=supabase): the caller must be owner or admin of
-    `org_id` per `organization_members`.
+    `org_id` per `organization_members` — UNLESS they are a studio
+    super-admin (`profiles.role == 'admin'`), who bypasses the per-org
+    membership check for ANY `org_id` (DEC-yoru-rbac-ruling-1 Q1: consistent
+    with `visible_scope_sync`'s super-admin semantics — that caller already
+    sees every session across every org via the session read path, so this
+    is zero new exposure, just the same admin power reaching this gate too).
 
     Module-level (not a method) so other routers can reuse it — introduced
     for the token-analytics org-wide gate (9be89019, interim RBAC guard
@@ -219,6 +224,13 @@ def require_org_admin(request: Request, org_id: str) -> str:
         raise HTTPException(status_code=401, detail="Invalid session")
     caller_id = user_resp.user.id
     caller_email = user_resp.user.email or caller_id
+
+    try:
+        profile_rows = supabase.query_records("profiles", filters={"id": caller_id})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="profile lookup failed") from exc
+    if profile_rows and profile_rows[0].get("role") == "admin":
+        return caller_email
 
     try:
         memberships = supabase.query_records(
