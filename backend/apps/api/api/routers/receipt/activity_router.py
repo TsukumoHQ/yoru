@@ -10,7 +10,10 @@ admin sees all; cross-group wall). Authed dashboard only — never the public
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlmodel import Session as SQLSession, select
 
 from .db import get_session
@@ -40,6 +43,7 @@ class ActivityRouter:
         self,
         limit: int = Query(30, ge=1, le=200),
         offset: int = Query(0, ge=0),
+        flagged: Optional[bool] = Query(default=None),
         db: SQLSession = Depends(get_session),
         current_user: str = Depends(require_current_user),
     ) -> ActivityResponse:
@@ -51,6 +55,15 @@ class ActivityRouter:
         filters = [Event.kind.in_(_ACTIVITY_KINDS)]
         if visible is not None:
             filters.append(SessionRow.user.in_(visible))
+        # Exception-first feed (78766abf): same "is this event flagged"
+        # predicate as the session detail/trail views (`bool(e.flags or [])`)
+        # — Event.flags is the per-event source, not the session-level
+        # SessionRow.flagged column /sessions filters on. Applied AFTER the
+        # visibility filter above, so this never widens what's visible.
+        # flagged=False/omitted is a no-op (unfiltered), matching /sessions'
+        # backward-compatible default.
+        if flagged:
+            filters.append(func.json_array_length(Event.flags) > 0)
 
         stmt = (
             select(Event, SessionRow.user, SessionRow.agent)

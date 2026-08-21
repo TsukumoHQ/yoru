@@ -102,3 +102,44 @@ def test_activity_requires_auth(client, db_session):
     _seed(db_session)
     resp = client.get("/api/v1/activity")
     assert resp.status_code == 401
+
+
+def test_activity_flagged_true_filters_to_flagged_only(client, db_session, alice_headers):
+    _seed(db_session)
+    db_session.add(Event(
+        session_id="sa", kind="file_change", tool="Write", path="secrets.env",
+        flags=["secret_generic"], ts=BASE_TS + timedelta(minutes=9),
+    ))
+    db_session.commit()
+
+    resp = client.get(
+        "/api/v1/activity", params={"flagged": "true"}, headers=alice_headers
+    )
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["path"] == "secrets.env"
+    assert items[0]["flags"] == ["secret_generic"]
+
+
+def test_activity_flagged_omitted_or_false_unchanged(client, db_session, alice_headers):
+    _seed(db_session)
+    resp_omitted = client.get("/api/v1/activity", headers=alice_headers)
+    resp_false = client.get(
+        "/api/v1/activity", params={"flagged": "false"}, headers=alice_headers
+    )
+    assert resp_omitted.status_code == resp_false.status_code == 200
+    assert resp_omitted.json()["items"] == resp_false.json()["items"]
+    # Same 4 curated events as test_activity_curated_reverse_chron_and_scoped.
+    assert len(resp_omitted.json()["items"]) == 4
+
+
+def test_activity_flagged_respects_visibility_scope(client, db_session, alice_headers):
+    """flagged=true must never surface bob's flagged event to alice — the
+    flagged filter applies AFTER the visibility wall, not instead of it."""
+    _seed(db_session)
+    resp = client.get(
+        "/api/v1/activity", params={"flagged": "true"}, headers=alice_headers
+    )
+    assert resp.status_code == 200
+    assert all(i["session_id"] != "sb" for i in resp.json()["items"])
