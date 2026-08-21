@@ -9,7 +9,7 @@
 // Reads only the events already on the loaded session; no new API, no backend.
 // Human-facing generated phrasing is kept plain and specific (anti-slop).
 import { useCallback, useMemo, useState } from "react"
-import { redactTokens, isCustomFlag } from "@receipt/ui"
+import { redactTokens, isCustomFlag, isSkillFlag, SKILL_RULE_LABEL } from "@receipt/ui"
 import type { CustomRuleInfo, RedFlagKind, SessionEvent } from "../../types/receipt"
 
 // Presets only — a custom:<uuid> flag is resolved via `customRuleInfo`
@@ -183,7 +183,12 @@ export function CausalReplay({ events, customRuleInfo }: CausalReplayProps) {
                     >
                       {isCustomFlag(f)
                         ? (customRuleInfo?.[f]?.name ?? `custom: ${shortId(f)}`)
-                        : (FLAG_LABEL[f] ?? f)}
+                        : isSkillFlag(f)
+                          // skill:<id> ids are short readable rule names (not
+                          // uuids like custom:), so slice verbatim — shortId's
+                          // 8-char truncation is custom:-specific.
+                          ? (SKILL_RULE_LABEL[f] ?? f.slice("skill:".length))
+                          : (FLAG_LABEL[f] ?? f)}
                     </span>
                   ))}
                 </p>

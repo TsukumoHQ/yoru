@@ -47,6 +47,11 @@
      warm-alarm gradient above, so a custom hit reads as "user-configured",
      not a 7th severity rung. */
   --flag-custom:    8 145 178;  /* #0891b2 cyan-600 */
+  /* Additive 8th value (task fa3baa27): built-in skill-safety catalog.
+     Deep indigo — deliberately distinct from both the warm-alarm preset
+     gradient and custom's cool cyan, so a skill hit reads as its own
+     built-in category, not user-configured, not a 7th severity rung. */
+  --flag-skill:     79 70 229;   /* #4f46e5 indigo-600 */
 
   /* File-op semantic tokens — Swiss "color as information, not decoration."
      create=emerald (clean add), edit=accent amber (ink touched),

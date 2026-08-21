@@ -4,12 +4,40 @@ import type { RedFlagKind } from "./types"
 
 // The 6 built-in presets — a closed, load-bearing set (do NOT add a 7th
 // preset here; org-defined rules are the `custom:<uuid>` case handled below).
-type PresetKind = Exclude<RedFlagKind, `custom:${string}`>
+type PresetKind = Exclude<RedFlagKind, `custom:${string}` | `skill:${string}`>
 
 /** True for an org-defined rule hit (`custom:<uuid>`), false for one of the
  *  6 built-in presets. */
 export function isCustomFlag(kind: RedFlagKind): kind is `custom:${string}` {
   return kind.startsWith("custom:")
+}
+
+/** True for a built-in skill-safety rule hit (`skill:<id>`, task fa3baa27). */
+export function isSkillFlag(kind: RedFlagKind): kind is `skill:${string}` {
+  return kind.startsWith("skill:")
+}
+
+// Static labels for the 16-rule skill-safety catalog (backend/apps/api/api/
+// routers/receipt/skill_safety.py `_RULES`) — a fixed built-in set, so
+// (unlike `custom:`) the label never needs an org fetch. Keep in sync with
+// that table's keys.
+export const SKILL_RULE_LABEL: Record<string, string> = {
+  "skill:shell-curl-pipe-shell": "curl | shell",
+  "skill:shell-reverse-shell":   "reverse shell",
+  "skill:shell-sensitive-exfil": "sensitive-path exfil",
+  "skill:shell-destructive":     "destructive shell",
+  "skill:shell-env-dump":        "env dump",
+  "skill:path-credentials":      "credential path read",
+  "skill:net-cloud-metadata":    "cloud metadata probe",
+  "skill:net-raw-ip-endpoint":   "raw-IP endpoint",
+  "skill:inject-override":       "prompt injection: override",
+  "skill:inject-role-escape":    "prompt injection: role escape",
+  "skill:inject-concealment":    "prompt injection: concealment",
+  "skill:inject-invisible-text": "prompt injection: hidden text",
+  "skill:secret-private-key":    "private key",
+  "skill:secret-token":          "secret token",
+  "skill:hook-secret-touch":     "hook + secret touch",
+  "skill:pkg-structure":         "package-structure escape",
 }
 
 // Static literal maps so Tailwind JIT resolves every utility referenced via
@@ -50,11 +78,14 @@ interface RedFlagBadgeProps {
 
 function RedFlagBadgeImpl({ kind, label, severity, className, onClick }: RedFlagBadgeProps) {
   const custom = isCustomFlag(kind)
-  const badgeKind: FlagKind = custom ? "custom" : KIND_MAP[kind as PresetKind]
+  const skill = isSkillFlag(kind)
+  const badgeKind: FlagKind = custom ? "custom" : skill ? "skill" : KIND_MAP[kind as PresetKind]
   const children = custom
     ? (label ?? `custom: ${kind.slice("custom:".length, "custom:".length + 8)}`)
-    : LABEL[kind as PresetKind]
-  const title = custom
+    : skill
+      ? (SKILL_RULE_LABEL[kind] ?? kind.slice("skill:".length))
+      : LABEL[kind as PresetKind]
+  const title = custom || skill
     ? (severity ? `${children} · ${severity}` : children)
     : kind
   const badge = (

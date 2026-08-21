@@ -160,6 +160,13 @@ function normalizeFlag(rule: string): import("../types/receipt").RedFlagKind | n
       if (rule.startsWith("custom:")) {
         return rule as import("../types/receipt").RedFlagKind
       }
+      // Built-in skill-safety rule (task fa3baa27) — carry verbatim like
+      // custom:, but its label is a static lookup (RedFlagBadge's
+      // SKILL_RULE_LABEL), never a per-org fetch: the 16-rule catalog is
+      // fixed, not user-editable.
+      if (rule.startsWith("skill:")) {
+        return rule as import("../types/receipt").RedFlagKind
+      }
       if (!WARNED_UNKNOWN.has(rule)) {
         WARNED_UNKNOWN.add(rule)
         console.warn(`[red-flag] unknown backend rule_id %o — dropped from UI. Update normalizeFlag in lib/api.ts.`, rule)

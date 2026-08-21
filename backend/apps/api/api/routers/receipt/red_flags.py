@@ -9,6 +9,8 @@ import json
 import re
 from typing import TYPE_CHECKING
 
+from .skill_safety import severity_of_skill_rule
+
 if TYPE_CHECKING:
     from .models import EventIn
 
@@ -132,11 +134,12 @@ def category_of(rule_id: str) -> str:
     secret_* -> secret; shell_* -> shell; db_destructive -> db;
     migration_file -> migration; env_mutation -> env; ci_config -> ci.
     ``custom:*`` -> "custom" — an additive 7th value for org-defined rules
-    (design trovex:961a5e80, task 569f1d47). Do NOT add a preset here for it;
-    the six stay exactly six. An unrecognized id falls back to "secret" only
-    if it is secret-prefixed, else "shell" is never assumed — unknown ids
-    return "other" so a taxonomy drift surfaces instead of silently
-    miscategorizing.
+    (design trovex:961a5e80, task 569f1d47). ``skill:*`` -> "skill-safety" —
+    an additive 8th value for the built-in skill-content ruleset (design cto
+    2026-08-21, task fa3baa27). Do NOT add a preset here for either; the six
+    stay exactly six. An unrecognized id falls back to "secret" only if it is
+    secret-prefixed, else "shell" is never assumed — unknown ids return
+    "other" so a taxonomy drift surfaces instead of silently miscategorizing.
     """
     if rule_id.startswith("secret_"):
         return "secret"
@@ -152,6 +155,8 @@ def category_of(rule_id: str) -> str:
         return "ci"
     if rule_id.startswith("custom:"):
         return "custom"
+    if rule_id.startswith("skill:"):
+        return "skill-safety"
     return "other"
 
 
@@ -165,9 +170,15 @@ def severity_of(rule_id: str, custom_severity: str | None = None) -> str:
     rule in hand at scan time) passes it via ``custom_severity``. Falls back
     to "high" if a custom rule_id shows up without one (defensive — should
     never happen on the real ingest path).
+
+    A skill-safety rule's severity is embedded in its own static catalog
+    (``skill_safety._RULES``) rather than caller-supplied — it's a built-in
+    deterministic table, not per-org configurable like custom rules.
     """
     if rule_id.startswith("custom:"):
         return custom_severity or "high"
+    if rule_id.startswith("skill:"):
+        return severity_of_skill_rule(rule_id)
     return _CATEGORY_SEVERITY.get(category_of(rule_id), "high")
 
 

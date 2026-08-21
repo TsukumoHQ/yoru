@@ -42,6 +42,7 @@ from libs.log_manager.controller import LoggingController
 
 from .billing.plan_limits import session_cap_for
 from .custom_rules import get_org_rules, scan_custom
+from .skill_safety import scan_skill_safety
 from .db import get_session
 from .deps import get_current_org, get_current_user
 from .models import (
@@ -530,6 +531,17 @@ class EventsRouter:
                 if rule_id not in flags:
                     flags.append(rule_id)
                 custom_severity[rule_id] = sev
+
+            # Skill-safety rules (design cto 2026-08-21, task fa3baa27):
+            # built-in deterministic catalog (16 rules), evaluated after
+            # custom rules. No DB/cache — scan_skill_safety no-ops unless the
+            # event touches skill surface (SKILL.md / .claude/skills/ /
+            # settings.json), so this is zero-cost on the vast majority of
+            # events. Severity is embedded in the catalog (skill_safety.py),
+            # not caller-supplied like custom_severity above.
+            for rule_id in scan_skill_safety(e):
+                if rule_id not in flags:
+                    flags.append(rule_id)
 
             # Phase C/W1 — routing: capture cwd/git context on first event of
             # a session and resolve the target workspace via resolve_workspace

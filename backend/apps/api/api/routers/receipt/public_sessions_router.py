@@ -7,8 +7,10 @@ POST /sessions/{id}/share. The endpoint:
   both so callers can't probe private sessions by id).
 - Redacts owner PII (no `user` field on the wire; no `cwd`, `git_remote`,
   or `git_branch`).
-- Redacts the **content** of any event that carries a `secret_*` flag OR
-  a `custom:*` flag (org custom rule, design trovex:961a5e80) — the
+- Redacts the **content** of any event that carries a `secret_*` flag, a
+  `custom:*` flag (org custom rule, design trovex:961a5e80), or a `skill:*`
+  flag (built-in skill-safety catalog, task fa3baa27 — malicious skill
+  content is exactly what a public share must not republish verbatim) — the
   structural fact of the flag stays visible (that's the story the viewer
   came for) but the raw content does not. Non-secret preset-flagged events
   (shell_rm, db_destructive, migration_edit, etc.) are returned verbatim
@@ -146,8 +148,22 @@ def _is_secret_flag(flag: str) -> bool:
     (redacted) rather than risk leaking exactly the content the user asked
     yoru to watch for. Whether to distinguish "secret-like" from
     "dangerous-action-like" custom rules is a v2 question (would need a
-    per-rule flag), not a v1 corner-cut against a real leak."""
-    return flag.startswith("secret_") or flag.startswith("custom:")
+    per-rule flag), not a v1 corner-cut against a real leak.
+
+    Also true for any skill-safety rule (`skill:*`, task fa3baa27) — same
+    conservative-safe default, and doubly warranted here: several skill-safety
+    rules exist specifically to catch a secret (secret-token,
+    secret-private-key) or malicious instruction text (inject-*) EMBEDDED IN
+    a skill file, using thresholds broader than the six presets' secret_*
+    patterns (e.g. skill:secret-token's sk-ant-/ghp_ minimum lengths are
+    shorter than secret_anthropic's/secret_github's) — so a skill-safety hit
+    is not reliably co-flagged by a secret_* preset on the same event. Public
+    redaction must not depend on that coincidence."""
+    return (
+        flag.startswith("secret_")
+        or flag.startswith("custom:")
+        or flag.startswith("skill:")
+    )
 
 
 def _redact_event(ev_out, *, flags: list[str]) -> PublicEventOut:

@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import { formatCost, isCustomFlag } from "@receipt/ui"
+import { formatCost, isCustomFlag, isSkillFlag } from "@receipt/ui"
 import { normalizeFlagCounts } from "../../lib/api"
 import type { Session, SessionList, RedFlagKind } from "../../types/receipt"
 
@@ -93,10 +93,13 @@ function flagBreakdown(flagsByKind: Map<RedFlagKind, number>): string {
     (k) => `${FLAG_LABEL[k]} ${flagsByKind.get(k)}`,
   )
   let customTotal = 0
+  let skillTotal = 0
   for (const [k, n] of flagsByKind) {
     if (isCustomFlag(k)) customTotal += n
+    else if (isSkillFlag(k)) skillTotal += n
   }
   if (customTotal > 0) parts.push(`custom ${customTotal}`)
+  if (skillTotal > 0) parts.push(`skill-safety ${skillTotal}`)
   return parts.join(" · ")
 }
 

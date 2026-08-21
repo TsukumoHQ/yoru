@@ -26,7 +26,7 @@ export { useFilters, parseFilters, KNOWN_VCS_PROVIDERS } from "./filters"
 // Primitives
 export { Badge, type FlagKind } from "./Badge"
 export { EmptyState } from "./EmptyState"
-export { RedFlagBadge, isCustomFlag } from "./RedFlagBadge"
+export { RedFlagBadge, isCustomFlag, isSkillFlag, SKILL_RULE_LABEL } from "./RedFlagBadge"
 export { CodeBlock, langFromPath, type CodeLang } from "./CodeBlock"
 export { Markdown } from "./Markdown"
 

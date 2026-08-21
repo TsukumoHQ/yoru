@@ -9,6 +9,11 @@ export type RedFlagKind =
    *  backend rule_id verbatim (`custom:<uuid>`) so callers can look up the
    *  rule's name — the 6 presets above stay a closed, load-bearing set. */
   | `custom:${string}`
+  /** Built-in skill-safety rule (design cto 2026-08-21, task fa3baa27).
+   *  Carries the backend rule_id verbatim (`skill:<id>`) — unlike `custom:`,
+   *  this is a FIXED non-editable 16-rule catalog, so the label is a static
+   *  lookup (RedFlagBadge's SKILL_RULE_LABEL), never fetched per-org. */
+  | `skill:${string}`
 
 /** rule_id (`custom:<uuid>`) → the org's rule name + configured severity.
  *  Resolved client-side by the app (fetch from /orgs/{org}/red-flag-rules);

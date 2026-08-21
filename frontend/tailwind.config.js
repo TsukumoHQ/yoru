@@ -63,6 +63,7 @@ export default {
           migration: { DEFAULT: "rgb(var(--flag-migration) / <alpha-value>)", bg: "#78350f", fg: "#fef3c7" },
           ci:        { DEFAULT: "rgb(var(--flag-ci)        / <alpha-value>)", bg: "#713f12", fg: "#fef9c3" },
           custom:    { DEFAULT: "rgb(var(--flag-custom)    / <alpha-value>)", bg: "#083344", fg: "#cffafe" },
+          skill:     { DEFAULT: "rgb(var(--flag-skill)     / <alpha-value>)", bg: "#1e1b4b", fg: "#e0e7ff" },
         },
         // File-op semantic colors — Swiss "color as information."
         // Use as `text-op-create`, `bg-op-edit/10`, `border-op-delete`.

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export type FlagKind = 'secret' | 'env' | 'shell' | 'db' | 'migration' | 'ci' | 'custom'
+export type FlagKind = 'secret' | 'env' | 'shell' | 'db' | 'migration' | 'ci' | 'custom' | 'skill'
 
 interface BadgeProps {
   kind: FlagKind
@@ -21,6 +21,10 @@ const STYLES: Record<FlagKind, string> = {
   // tell that this hit came from an org-defined rule, not one of the six
   // built-in presets.
   custom:    'bg-flag-custom-bg    text-flag-custom-fg    ring-flag-custom border border-dashed border-flag-custom',
+  // Solid ring (no dashed border, unlike `custom`) — a skill-safety hit is a
+  // fixed built-in rule, not user-configured, so it doesn't carry the
+  // "user-configured" visual tell that `custom` does.
+  skill:     'bg-flag-skill-bg     text-flag-skill-fg     ring-flag-skill',
 }
 
 const DEFAULT_LABEL: Record<FlagKind, string> = {
@@ -31,6 +35,7 @@ const DEFAULT_LABEL: Record<FlagKind, string> = {
   migration: 'migration',
   ci:        'ci',
   custom:    'custom',
+  skill:     'skill-safety',
 }
 
 const ARIA_LABEL: Record<FlagKind, string> = {
@@ -41,6 +46,7 @@ const ARIA_LABEL: Record<FlagKind, string> = {
   migration: 'red flag: database migration edited',
   ci:        'red flag: CI config edited',
   custom:    'red flag: org-defined rule matched',
+  skill:     'red flag: skill-safety rule matched',
 }
 
 export function Badge({ kind, children, className = '', title }: BadgeProps) {
