@@ -170,6 +170,77 @@ def org_default_workspace_id(org_id: str) -> str:
     return rows[0]["id"]
 
 
+def require_dashboard_jwt(request: Request) -> str:
+    """Admin endpoints require a dashboard session (Supabase JWT via cookie).
+    CLI bearer tokens are rejected — you manage tokens from the UI, not from
+    another CLI. Module-level so other routers (e.g. analytics_router's
+    org-wide token-usage gate, 9be89019) can reuse it without instantiating
+    AuthRouter."""
+    jwt = request.cookies.get(SESSION_COOKIE_NAME)
+    if not jwt:
+        raise HTTPException(
+            status_code=401,
+            detail="Sign in to the dashboard to manage service tokens",
+        )
+    return jwt
+
+
+def require_org_admin(request: Request, org_id: str) -> str:
+    """Authorize an org-admin action. Returns the caller's email.
+
+    Self-host (AUTH_PROVIDER=local): single-tenant, no org model. Per the
+    README ("the first registered user becomes the admin"), any
+    authenticated dashboard user is authorized — validate the session via
+    the local auth provider; authenticated == authorized.
+
+    Cloud (AUTH_PROVIDER=supabase): the caller must be owner or admin of
+    `org_id` per `organization_members`.
+
+    Module-level (not a method) so other routers can reuse it — introduced
+    for the token-analytics org-wide gate (9be89019, interim RBAC guard
+    ahead of the d2cf7c71 design ruling: a dev must never be able to pull a
+    colleague's usage). `AuthRouter._require_org_admin` delegates here.
+    """
+    jwt = require_dashboard_jwt(request)
+
+    if _is_local_auth():
+        email = get_auth_provider().email_from_token(jwt)
+        if not email:
+            raise HTTPException(status_code=401, detail="Invalid session")
+        return email
+
+    from libs.supabase.supabase import SupabaseManager
+    supabase = SupabaseManager(access_token=jwt)
+    try:
+        user_resp = supabase.client.auth.get_user(jwt)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid session") from exc
+    if not user_resp or not user_resp.user:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    caller_id = user_resp.user.id
+    caller_email = user_resp.user.email or caller_id
+
+    try:
+        memberships = supabase.query_records(
+            "organization_members",
+            filters={"org_id": org_id, "user_id": caller_id},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="membership lookup failed") from exc
+    if not memberships:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a member of this organization",
+        )
+    role = memberships[0].get("role")
+    if role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Owner or admin role required for this action",
+        )
+    return caller_email
+
+
 def _hash_refresh(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -777,66 +848,10 @@ class AuthRouter:
     # ---------- Service tokens (Phase B — headless/CI/fleet) ----------
 
     def _require_dashboard_jwt(self, request: Request) -> str:
-        """Admin endpoints require a dashboard session (Supabase JWT via cookie).
-        CLI bearer tokens are rejected — you manage tokens from the UI, not
-        from another CLI."""
-        jwt = request.cookies.get(SESSION_COOKIE_NAME)
-        if not jwt:
-            raise HTTPException(
-                status_code=401,
-                detail="Sign in to the dashboard to manage service tokens",
-            )
-        return jwt
+        return require_dashboard_jwt(request)
 
     def _require_org_admin(self, request: Request, org_id: str) -> str:
-        """Authorize a service-token admin action. Returns the caller's email.
-
-        Self-host (AUTH_PROVIDER=local): single-tenant, no org model. Per the
-        README ("the first registered user becomes the admin"), any
-        authenticated dashboard user manages service tokens — validate the
-        session via the local auth provider; authenticated == authorized.
-
-        Cloud (AUTH_PROVIDER=supabase): UNCHANGED — the caller must be owner or
-        admin of `org_id` per `organization_members`.
-        """
-        jwt = self._require_dashboard_jwt(request)
-
-        if _is_local_auth():
-            email = get_auth_provider().email_from_token(jwt)
-            if not email:
-                raise HTTPException(status_code=401, detail="Invalid session")
-            return email
-
-        from libs.supabase.supabase import SupabaseManager
-        supabase = SupabaseManager(access_token=jwt)
-        try:
-            user_resp = supabase.client.auth.get_user(jwt)
-        except Exception as exc:
-            raise HTTPException(status_code=401, detail="Invalid session") from exc
-        if not user_resp or not user_resp.user:
-            raise HTTPException(status_code=401, detail="Invalid session")
-        caller_id = user_resp.user.id
-        caller_email = user_resp.user.email or caller_id
-
-        try:
-            memberships = supabase.query_records(
-                "organization_members",
-                filters={"org_id": org_id, "user_id": caller_id},
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail="membership lookup failed") from exc
-        if not memberships:
-            raise HTTPException(
-                status_code=403,
-                detail="You are not a member of this organization",
-            )
-        role = memberships[0].get("role")
-        if role not in ("owner", "admin"):
-            raise HTTPException(
-                status_code=403,
-                detail="Owner or admin role required to manage service tokens",
-            )
-        return caller_email
+        return require_org_admin(request, org_id)
 
     def _org_default_workspace_id(self, org_id: str) -> str:
         return org_default_workspace_id(org_id)

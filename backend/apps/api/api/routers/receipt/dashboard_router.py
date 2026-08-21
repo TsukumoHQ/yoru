@@ -198,6 +198,12 @@ class DashboardRouter:
                 func.coalesce(func.sum(SessionRow.cost_usd), 0.0).label(
                     "total_cost_usd"
                 ),
+                func.coalesce(func.sum(SessionRow.tokens_input), 0).label(
+                    "tokens_input"
+                ),
+                func.coalesce(func.sum(SessionRow.tokens_output), 0).label(
+                    "tokens_output"
+                ),
             )
             .where(SessionRow.started_at >= since_dt)
             .where(scope_filter)
@@ -212,6 +218,8 @@ class DashboardRouter:
                 sessions=int(r.sessions),
                 flagged=int(r.flagged or 0),
                 total_cost_usd=float(r.total_cost_usd or 0.0),
+                tokens_input=int(r.tokens_input or 0),
+                tokens_output=int(r.tokens_output or 0),
             )
             for r in rows
         ]

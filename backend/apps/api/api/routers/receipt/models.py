@@ -807,6 +807,11 @@ class TeamDashboardUser(SQLModel):
     sessions: int
     flagged: int
     total_cost_usd: float
+    # Token rollup (9be89019 scope (a)) — same per-user visibility as
+    # total_cost_usd above (this endpoint already shows teammates' cost to
+    # any workspace member; tokens are the same class of usage data).
+    tokens_input: int = 0
+    tokens_output: int = 0
 
 
 class TeamDashboardTotals(SQLModel):
@@ -818,6 +823,49 @@ class TeamDashboardTotals(SQLModel):
 class TeamDashboardOut(SQLModel):
     users: list[TeamDashboardUser]
     totals: TeamDashboardTotals
+
+
+# ---------- Token analytics (9be89019, DEC-yoru-design-ruling-1 stats panel) ----------
+# Interim RBAC guard (cto-tsukumo, ahead of the d2cf7c71 design ruling): own-scope
+# is ALWAYS returned; org-wide totals/series/top-spenders are gated behind
+# `require_org_admin` — a dev must never be able to pull a colleague's usage.
+
+class TokenAnalyticsBucket(SQLModel):
+    bucket_start: datetime
+    tokens_input: int
+    tokens_output: int
+    cost_usd: float
+
+
+class TokenAnalyticsTotals(SQLModel):
+    tokens_input: int
+    tokens_output: int
+    cost_usd: float
+
+
+class TokenAnalyticsSpender(SQLModel):
+    user: str
+    tokens_input: int
+    tokens_output: int
+    cost_usd: float
+
+
+class TokenAnalyticsScope(SQLModel):
+    totals: TokenAnalyticsTotals
+    series: list[TokenAnalyticsBucket]
+
+
+class TokenAnalyticsOrgScope(TokenAnalyticsScope):
+    top_spenders: list[TokenAnalyticsSpender]
+
+
+class TokenAnalyticsOut(SQLModel):
+    bucket: Literal["day", "week"]
+    since: datetime
+    until: datetime
+    own: TokenAnalyticsScope
+    # None unless `org_id` was requested AND the caller passed the admin gate.
+    org: Optional[TokenAnalyticsOrgScope] = None
 
 
 # ---------- Public share (#79) ----------

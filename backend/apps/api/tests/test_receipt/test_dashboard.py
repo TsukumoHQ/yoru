@@ -111,14 +111,17 @@ def test_populated_db_returns_groupings(
         SessionRow(
             id="s1", user="alice@x.io", started_at=now,
             cost_usd=1.50, flagged=True, workspace_id=_SCOPE_WS,
+            tokens_input=1000, tokens_output=200,
         ),
         SessionRow(
             id="s2", user="alice@x.io", started_at=now,
             cost_usd=0.75, flagged=False, workspace_id=_SCOPE_WS,
+            tokens_input=500, tokens_output=100,
         ),
         SessionRow(
             id="s3", user="bob@x.io", started_at=now,
             cost_usd=2.25, flagged=False, workspace_id=_SCOPE_WS,
+            tokens_input=3000, tokens_output=400,
         ),
     )
 
@@ -132,12 +135,16 @@ def test_populated_db_returns_groupings(
         "sessions": 2,
         "flagged": 1,
         "total_cost_usd": 2.25,
+        "tokens_input": 1500,
+        "tokens_output": 300,
     }
     assert by_email["bob@x.io"] == {
         "email": "bob@x.io",
         "sessions": 1,
         "flagged": 0,
         "total_cost_usd": 2.25,
+        "tokens_input": 3000,
+        "tokens_output": 400,
     }
 
     assert body["totals"]["sessions"] == 3
@@ -173,6 +180,8 @@ def test_since_filter_drops_older_rows(
         "sessions": 1,
         "flagged": 1,
         "total_cost_usd": 1.00,
+        "tokens_input": 0,
+        "tokens_output": 0,
     }
     assert body["totals"] == {
         "sessions": 1,

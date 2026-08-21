@@ -50,6 +50,7 @@ from apps.api.api.routers.sales.contact import SalesContactRouter
 from apps.api.api.routers.subscriptions.router import SubscriptionsRouter
 from apps.api.api.routers.receipt.auth_router import AuthRouter
 from apps.api.api.routers.receipt.custom_rules_router import CustomRulesRouter
+from apps.api.api.routers.receipt.analytics_router import AnalyticsRouter
 from apps.api.api.routers.receipt.dashboard_router import DashboardRouter
 from apps.api.api.routers.receipt.db import init_db
 from apps.api.api.routers.receipt.events_router import EventsRouter
@@ -303,6 +304,9 @@ app.include_router(InstanceAdminRouter().get_router(), prefix="/api/v1")
 
 dashboard_router = DashboardRouter()
 app.include_router(dashboard_router.get_router(), prefix="/api/v1")
+
+analytics_router = AnalyticsRouter()
+app.include_router(analytics_router.get_router(), prefix="/api/v1")
 
 # Billing + sales are hosted-only. A self-hosted instance (BILLING_ENABLED unset)
 # never mounts the Stripe/Polar checkout/portal/webhook or the contact-sales form,
