@@ -5,6 +5,18 @@ export type RedFlagKind =
   | "migration-edit"
   | "env-mutation"
   | "ci-config-edit"
+  /** Org-defined rule (design trovex:961a5e80, task 569f1d47). Carries the
+   *  backend rule_id verbatim (`custom:<uuid>`) so callers can look up the
+   *  rule's name — the 6 presets above stay a closed, load-bearing set. */
+  | `custom:${string}`
+
+/** rule_id (`custom:<uuid>`) → the org's rule name + configured severity.
+ *  Resolved client-side by the app (fetch from /orgs/{org}/red-flag-rules);
+ *  the display components only render what they're given. */
+export interface CustomRuleInfo {
+  name: string
+  severity: string
+}
 
 export type EventType = "tool_call" | "file_change" | "error" | "message"
 

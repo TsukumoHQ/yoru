@@ -1,5 +1,5 @@
 import { createContext, memo, useContext, useMemo, useState, type ReactNode } from "react"
-import type { SessionEvent } from "./types"
+import type { SessionEvent, CustomRuleInfo } from "./types"
 import { TimelineEvent, formatDurationMs } from "./TimelineEvent"
 
 // Compound-component context per vercel-composition-patterns. Children read it
@@ -17,6 +17,7 @@ interface TimelineGroupContextValue {
   onFlagClick?: () => void
   expandedEvents?: Set<string>
   toggleEvent?: (id: string) => void
+  customRuleInfo?: Record<string, CustomRuleInfo>
 }
 
 const TimelineGroupContext = createContext<TimelineGroupContextValue | null>(null)
@@ -41,6 +42,7 @@ interface TimelineGroupProps {
   onFlagClick?: () => void
   expandedEvents?: Set<string>
   toggleEvent?: (id: string) => void
+  customRuleInfo?: Record<string, CustomRuleInfo>
   /** Always exactly <TimelineGroup.Summary /> + <TimelineGroup.Details />. */
   children: ReactNode
 }
@@ -54,6 +56,7 @@ function TimelineGroupRoot({
   onFlagClick,
   expandedEvents,
   toggleEvent,
+  customRuleInfo,
   children,
 }: TimelineGroupProps) {
   const controlled = expandedProp !== undefined && onToggle !== undefined
@@ -72,8 +75,9 @@ function TimelineGroupRoot({
       onFlagClick,
       expandedEvents,
       toggleEvent,
+      customRuleInfo,
     }
-  }, [expanded, controlled, onToggle, events, tool, groupKey, onFlagClick, expandedEvents, toggleEvent])
+  }, [expanded, controlled, onToggle, events, tool, groupKey, onFlagClick, expandedEvents, toggleEvent, customRuleInfo])
   return <TimelineGroupContext.Provider value={value}>{children}</TimelineGroupContext.Provider>
 }
 
@@ -172,7 +176,7 @@ const Summary = memo(SummaryImpl)
 // underlying events as nested TimelineEvent rows.
 
 function DetailsImpl() {
-  const { expanded, events, groupKey, onFlagClick, expandedEvents, toggleEvent } =
+  const { expanded, events, groupKey, onFlagClick, expandedEvents, toggleEvent, customRuleInfo } =
     useTimelineGroup()
   if (!expanded) return null
   return (
@@ -189,6 +193,7 @@ function DetailsImpl() {
               onFlagClick={onFlagClick}
               expanded={controlled ? expandedEvents.has(id) : undefined}
               onToggle={controlled ? () => toggleEvent(id) : undefined}
+              customRuleInfo={customRuleInfo}
             />
           )
         })}

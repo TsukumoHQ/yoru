@@ -154,6 +154,12 @@ function normalizeFlag(rule: string): import("../types/receipt").RedFlagKind | n
     case "env_mutation":   return "env-mutation"
     case "ci_config":      return "ci-config-edit"
     default:
+      // Org-defined rule (task 569f1d47 follow-up) — carry the rule_id
+      // verbatim so the badge layer can resolve its name via
+      // fetchCustomRuleInfo. Never dropped like a genuinely unknown id.
+      if (rule.startsWith("custom:")) {
+        return rule as import("../types/receipt").RedFlagKind
+      }
       if (!WARNED_UNKNOWN.has(rule)) {
         WARNED_UNKNOWN.add(rule)
         console.warn(`[red-flag] unknown backend rule_id %o — dropped from UI. Update normalizeFlag in lib/api.ts.`, rule)
@@ -1066,4 +1072,38 @@ export async function downloadOrgAuditExport(
   a.remove()
   URL.revokeObjectURL(url)
   return { truncated }
+}
+
+// ---- Custom red-flag rule names (task 569f1d47 follow-up) ----
+// The dashboard only ever needs {name, severity} per rule id to label a
+// `custom:<uuid>` badge — not the full CRUD shape (pattern, filters, etc.).
+
+interface RawCustomRule {
+  id: string
+  name: string
+  severity: string
+}
+
+/** Fetch an org's custom red-flag rules and key them by the exact
+ *  `custom:<uuid>` flag string, so callers can index straight from a
+ *  session/event's `flag` field with no string surgery. 404 (no such org —
+ *  regular member viewing cross-org, or org deleted) resolves to an empty
+ *  map rather than throwing: a badge that can't resolve its name just falls
+ *  back to RedFlagBadge's own short-id label. */
+export async function fetchCustomRuleInfo(
+  orgId: string,
+): Promise<Record<string, import("../types/receipt").CustomRuleInfo>> {
+  let rules: RawCustomRule[]
+  try {
+    rules = await apiFetch<RawCustomRule[]>(
+      `/orgs/${encodeURIComponent(orgId)}/red-flag-rules`,
+    )
+  } catch {
+    return {}
+  }
+  const out: Record<string, import("../types/receipt").CustomRuleInfo> = {}
+  for (const r of rules) {
+    out[`custom:${r.id}`] = { name: r.name, severity: r.severity }
+  }
+  return out
 }

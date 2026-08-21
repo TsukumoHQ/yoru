@@ -1,6 +1,6 @@
 import { memo, useState } from "react"
-import type { EventType, SessionEvent } from "./types"
-import { RedFlagBadge } from "./RedFlagBadge"
+import type { EventType, SessionEvent, CustomRuleInfo } from "./types"
+import { RedFlagBadge, isCustomFlag } from "./RedFlagBadge"
 import { ExpandedBody } from "./ExpandedBody"
 
 interface TimelineEventProps {
@@ -11,6 +11,10 @@ interface TimelineEventProps {
   /** Controlled expansion from Timeline — falls back to local state if absent. */
   expanded?: boolean
   onToggle?: () => void
+  /** Name/severity lookup for `custom:<uuid>` flags, keyed by the full flag
+   *  string. Absent or missing entries fall back to RedFlagBadge's own
+   *  short-id label — a custom hit is never dropped even pre-fetch. */
+  customRuleInfo?: Record<string, CustomRuleInfo>
 }
 
 // Kind tag: `[tool]` / `[file]` / `[err]` / `[msg]` colored per category.
@@ -91,6 +95,9 @@ function tintForFlag(flag?: string): string | null {
     case "ci-config-edit":
       return "border-l-2 border-l-flag-ci bg-flag-ci-bg/20"
     default:
+      if (flag?.startsWith("custom:")) {
+        return "border-l-2 border-l-flag-custom bg-flag-custom-bg/20"
+      }
       return null
   }
 }
@@ -111,6 +118,7 @@ function TimelineEventImpl({
   onFlagClick,
   expanded: expandedProp,
   onToggle,
+  customRuleInfo,
 }: TimelineEventProps) {
   const [localOpen, setLocalOpen] = useState(false)
   const controlled = expandedProp !== undefined && onToggle !== undefined
@@ -187,7 +195,12 @@ function TimelineEventImpl({
         </span>
         {isFlag && event.flag && (
           <span className="shrink-0">
-            <RedFlagBadge kind={event.flag} onClick={onFlagClick} />
+            <RedFlagBadge
+              kind={event.flag}
+              onClick={onFlagClick}
+              label={isCustomFlag(event.flag) ? customRuleInfo?.[event.flag]?.name : undefined}
+              severity={isCustomFlag(event.flag) ? customRuleInfo?.[event.flag]?.severity : undefined}
+            />
           </span>
         )}
         {/* Duration chip — only for events >= 1s. Quick perf signal: slow

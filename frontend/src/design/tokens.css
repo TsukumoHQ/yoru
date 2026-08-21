@@ -42,6 +42,11 @@
   --flag-db:        168 85 247; /* #a855f7 purple — destructive DB ops (distinct visual class from shell rm) */
   --flag-migration: 217 119 6;  /* #d97706 amber */
   --flag-ci:        202 138 4;  /* #ca8a04 honey */
+  /* Additive 7th value (task 569f1d47 follow-up): org-defined custom rules.
+     Cool cyan — deliberately outside the wine/red/orange/purple/amber/honey
+     warm-alarm gradient above, so a custom hit reads as "user-configured",
+     not a 7th severity rung. */
+  --flag-custom:    8 145 178;  /* #0891b2 cyan-600 */
 
   /* File-op semantic tokens — Swiss "color as information, not decoration."
      create=emerald (clean add), edit=accent amber (ink touched),

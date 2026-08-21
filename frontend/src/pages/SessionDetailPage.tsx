@@ -10,6 +10,7 @@ import { FileChangedRail } from "../features/sessions/FileChangedRail"
 import { CostSparkline } from "../features/sessions/CostSparkline"
 import { CausalReplay } from "../features/sessions/CausalReplay"
 import { Timeline } from "../features/sessions/Timeline"
+import { useCustomRuleInfo } from "../features/sessions/useCustomRuleInfo"
 
 export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -63,10 +64,14 @@ export function SessionDetailPage() {
 }
 
 function Receipt({ session }: { session: SessionDetail }) {
+  // Name/severity lookup for `custom:<uuid>` badges — scoped to the SESSION's
+  // own org (not the studio super-admin's currently-selected org), so a
+  // cross-org view still resolves the right org's rule names.
+  const customRuleInfo = useCustomRuleInfo(session.org_id)
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <main className="min-w-0 space-y-6">
-        <SessionHero session={session} />
+        <SessionHero session={session} customRuleInfo={customRuleInfo} />
         <CostPanel session={session} />
         <IntegrityBadge sessionId={session.id} />
         {/* Steal #4 — the run as plain-English causal steps + a copyable run
@@ -81,10 +86,10 @@ function Receipt({ session }: { session: SessionDetail }) {
           aria-label="Timeline"
           className="rounded-sm border border-rule bg-surface"
         >
-          <Timeline events={session.events ?? []} onFlagClick={noop} />
+          <Timeline events={session.events ?? []} onFlagClick={noop} customRuleInfo={customRuleInfo} />
         </section>
       </main>
-      <FileChangedRail session={session} />
+      <FileChangedRail session={session} customRuleInfo={customRuleInfo} />
     </div>
   )
 }

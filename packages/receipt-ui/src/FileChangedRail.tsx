@@ -1,10 +1,12 @@
-import type { FileChanged, FileOp, RedFlagKind, SessionDetail } from "./types"
-import { RedFlagBadge } from "./RedFlagBadge"
+import type { FileChanged, FileOp, RedFlagKind, SessionDetail, CustomRuleInfo } from "./types"
+import { RedFlagBadge, isCustomFlag } from "./RedFlagBadge"
 import { ScorePanel } from "./ScorePanel"
 import { TokenPanel } from "./TokenPanel"
 
 interface FileChangedRailProps {
   session: SessionDetail
+  /** Name/severity lookup for `custom:<uuid>` flags — see TimelineEvent. */
+  customRuleInfo?: Record<string, CustomRuleInfo>
 }
 
 const OP_CLASS: Record<FileOp, string> = {
@@ -15,7 +17,7 @@ const OP_CLASS: Record<FileOp, string> = {
 
 const RUBRIC = "font-mono text-caption uppercase tracking-wider text-ink-faint"
 
-export function FileChangedRail({ session }: FileChangedRailProps) {
+export function FileChangedRail({ session, customRuleInfo }: FileChangedRailProps) {
   const files = session.files_changed ?? []
   // Reverse: newest flagged event at the top of the rail, matching the
   // Timeline + FilesPanel ordering convention ("latest first").
@@ -37,7 +39,7 @@ export function FileChangedRail({ session }: FileChangedRailProps) {
       }
     >
       <ScorePanel score={session.score} />
-      <FlagsPanel flags={session.flags} flagEvents={flagEvents} />
+      <FlagsPanel flags={session.flags} flagEvents={flagEvents} customRuleInfo={customRuleInfo} />
       {/* TokenPanel renders only when usage (kind=token) events are present;
           returns null otherwise (e.g. the redacted public session payload). */}
       <TokenPanel session={session} />
@@ -98,9 +100,10 @@ function FilesPanel({ files }: { files: FileChanged[] }) {
 interface FlagsPanelProps {
   flags: RedFlagKind[]
   flagEvents: SessionDetail["events"]
+  customRuleInfo?: Record<string, CustomRuleInfo>
 }
 
-function FlagsPanel({ flags, flagEvents }: FlagsPanelProps) {
+function FlagsPanel({ flags, flagEvents, customRuleInfo }: FlagsPanelProps) {
   if (flags.length === 0 && flagEvents.length === 0) return null
 
   // Count flag events per kind. An event can carry MULTIPLE flags
@@ -137,7 +140,11 @@ function FlagsPanel({ flags, flagEvents }: FlagsPanelProps) {
         <ul className="divide-y divide-dashed divide-rule">
           {kindsWithCounts.map(([kind, count]) => (
             <li key={kind} className="flex items-center gap-2 px-4 py-1.5">
-              <RedFlagBadge kind={kind} />
+              <RedFlagBadge
+                kind={kind}
+                label={isCustomFlag(kind) ? customRuleInfo?.[kind]?.name : undefined}
+                severity={isCustomFlag(kind) ? customRuleInfo?.[kind]?.severity : undefined}
+              />
               <span className="ml-auto font-mono text-caption tabular-nums text-ink-muted">
                 ×{count}
               </span>
@@ -180,7 +187,13 @@ function FlagsPanel({ flags, flagEvents }: FlagsPanelProps) {
                   }}
                   className="group flex items-center gap-2 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-paper hover:bg-sunken/40"
                 >
-                  {event.flag && <RedFlagBadge kind={event.flag} />}
+                  {event.flag && (
+                    <RedFlagBadge
+                      kind={event.flag}
+                      label={isCustomFlag(event.flag) ? customRuleInfo?.[event.flag]?.name : undefined}
+                      severity={isCustomFlag(event.flag) ? customRuleInfo?.[event.flag]?.severity : undefined}
+                    />
+                  )}
                   <span className="min-w-0 flex-1 truncate font-mono text-caption text-ink-muted">
                     {event.file_path ?? event.tool_name ?? event.text ?? "flagged event"}
                   </span>

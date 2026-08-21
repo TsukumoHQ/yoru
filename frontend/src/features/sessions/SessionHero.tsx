@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { SessionHeroView, type SessionDetail } from "@receipt/ui"
+import { SessionHeroView, type SessionDetail, type CustomRuleInfo } from "@receipt/ui"
 import {
   copyReceiptPng,
   downloadReceiptPng,
@@ -12,6 +12,7 @@ import { toast } from "../../components/Toaster"
 
 interface SessionHeroProps {
   session: SessionDetail
+  customRuleInfo?: Record<string, CustomRuleInfo>
 }
 
 // Share-pivot (TSU-54): the dashboard share action is LOCAL IMAGE EXPORT —
@@ -20,7 +21,7 @@ interface SessionHeroProps {
 // old public-share toggle is intentionally NOT wired here. The backend
 // /share endpoints + api.ts share fns stay dormant (private-by-default), not
 // ripped — they're just no longer surfaced in the dashboard hero.
-export function SessionHero({ session }: SessionHeroProps) {
+export function SessionHero({ session, customRuleInfo }: SessionHeroProps) {
   const [exporting, setExporting] = useState(false)
   const [receiptBusy, setReceiptBusy] = useState(false)
   const [replayBusy, setReplayBusy] = useState(false)
@@ -93,6 +94,7 @@ export function SessionHero({ session }: SessionHeroProps) {
   return (
     <SessionHeroView
       session={session}
+      customRuleInfo={customRuleInfo}
       onExport={onExport}
       isExporting={exporting}
       onGenerateSummary={() => summaryMutation.mutate()}

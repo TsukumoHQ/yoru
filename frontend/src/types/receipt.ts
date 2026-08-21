@@ -14,4 +14,5 @@ export type {
   SessionTotals,
   ActivityItem,
   ActivityList,
+  CustomRuleInfo,
 } from "@receipt/ui"

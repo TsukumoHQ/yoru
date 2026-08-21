@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Virtuoso } from "react-virtuoso"
-import type { EventType, SessionEvent } from "./types"
+import type { EventType, SessionEvent, CustomRuleInfo } from "./types"
 import { EmptyState } from "./EmptyState"
 import { TimelineEvent } from "./TimelineEvent"
 import { TimelineGroup } from "./TimelineGroup"
@@ -59,6 +59,9 @@ interface TimelineProps {
   events: SessionEvent[]
   /** Forwarded to flagged TimelineEvent rows so the legend modal can open. */
   onFlagClick?: () => void
+  /** Name/severity lookup for `custom:<uuid>` flags — forwarded to every
+   *  flagged row so a custom hit shows its rule name, not just "custom". */
+  customRuleInfo?: Record<string, CustomRuleInfo>
 }
 
 // Minimum size to coalesce consecutive same-tool events into a group.
@@ -71,7 +74,7 @@ type TimelineNode =
   | { kind: "event"; key: string; event: SessionEvent }
   | { kind: "group"; key: string; tool: string; groupKey: string; events: SessionEvent[] }
 
-export function Timeline({ events, onFlagClick }: TimelineProps) {
+export function Timeline({ events, onFlagClick, customRuleInfo }: TimelineProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => filtersFromParams(searchParams), [searchParams])
   const setFilters = useCallback(
@@ -249,6 +252,7 @@ export function Timeline({ events, onFlagClick }: TimelineProps) {
                     toggleEvent,
                     expandedGroups,
                     toggleGroup,
+                    customRuleInfo,
                   })
                 }
                 overscan={600}
@@ -262,6 +266,7 @@ export function Timeline({ events, onFlagClick }: TimelineProps) {
                     toggleEvent,
                     expandedGroups,
                     toggleGroup,
+                    customRuleInfo,
                   }),
                 )}
               </ol>
@@ -336,6 +341,7 @@ interface RenderCtx {
   toggleEvent: (id: string) => void
   expandedGroups: Set<string>
   toggleGroup: (groupKey: string) => void
+  customRuleInfo?: Record<string, CustomRuleInfo>
 }
 
 // Single renderer shared by the virtualized and non-virtualized branches.
@@ -353,6 +359,7 @@ function renderNode(node: TimelineNode, ctx: RenderCtx): ReactElement {
           onFlagClick={ctx.onFlagClick}
           expanded={ctx.expandedEvents.has(id)}
           onToggle={() => ctx.toggleEvent(id)}
+          customRuleInfo={ctx.customRuleInfo}
         />
       )
     }
@@ -368,6 +375,7 @@ function renderNode(node: TimelineNode, ctx: RenderCtx): ReactElement {
           onFlagClick={ctx.onFlagClick}
           expandedEvents={ctx.expandedEvents}
           toggleEvent={ctx.toggleEvent}
+          customRuleInfo={ctx.customRuleInfo}
         >
           <TimelineGroup.Summary />
           <TimelineGroup.Details />

@@ -15,6 +15,7 @@ export type {
   SessionTotals,
   ActivityItem,
   ActivityList,
+  CustomRuleInfo,
 } from "./types"
 
 // Utilities
@@ -25,7 +26,7 @@ export { useFilters, parseFilters, KNOWN_VCS_PROVIDERS } from "./filters"
 // Primitives
 export { Badge, type FlagKind } from "./Badge"
 export { EmptyState } from "./EmptyState"
-export { RedFlagBadge } from "./RedFlagBadge"
+export { RedFlagBadge, isCustomFlag } from "./RedFlagBadge"
 export { CodeBlock, langFromPath, type CodeLang } from "./CodeBlock"
 export { Markdown } from "./Markdown"
 

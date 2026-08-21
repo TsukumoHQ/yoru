@@ -1,9 +1,11 @@
 import { formatDuration, formatRelative } from "./format"
-import { RedFlagBadge } from "./RedFlagBadge"
-import type { SessionDetail } from "./types"
+import { RedFlagBadge, isCustomFlag } from "./RedFlagBadge"
+import type { SessionDetail, CustomRuleInfo } from "./types"
 
 interface SessionHeroViewProps {
   session: SessionDetail
+  /** Name/severity lookup for `custom:<uuid>` flags — see TimelineEvent. */
+  customRuleInfo?: Record<string, CustomRuleInfo>
   onExport?: () => void
   isExporting?: boolean
   onGenerateSummary?: () => void
@@ -31,6 +33,7 @@ const RUBRIC = "font-mono text-caption uppercase tracking-wider text-ink-faint"
 
 export function SessionHeroView({
   session,
+  customRuleInfo,
   onExport,
   isExporting = false,
   onGenerateSummary,
@@ -189,7 +192,12 @@ export function SessionHeroView({
         {session.flags.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             {session.flags.map((kind) => (
-              <RedFlagBadge key={kind} kind={kind} />
+              <RedFlagBadge
+                key={kind}
+                kind={kind}
+                label={isCustomFlag(kind) ? customRuleInfo?.[kind]?.name : undefined}
+                severity={isCustomFlag(kind) ? customRuleInfo?.[kind]?.severity : undefined}
+              />
             ))}
           </div>
         )}
