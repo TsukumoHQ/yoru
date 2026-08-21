@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
   { to: "/settings/workspaces",     label: "/workspaces" },
   { to: "/settings/teams",          label: "/teams" },
   { to: "/settings/tokens",         label: "/tokens" },
+  { to: "/settings/usage",          label: "/usage" },
   { to: "/settings/billing",        label: "/billing", billingOnly: true },
   { to: "/settings/profile",        label: "/profile" },
 ]

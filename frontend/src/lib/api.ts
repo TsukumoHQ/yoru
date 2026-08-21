@@ -1081,6 +1081,65 @@ export async function downloadOrgAuditExport(
   return { truncated }
 }
 
+// ---- Token-usage analytics (task 9be89019 backend, e7b0b7a1 panel) ----
+// GET /analytics/tokens. `own` (the caller's usage) is always populated;
+// `org` (org-wide totals + top spenders) is only present when `orgId` was
+// requested AND the backend's require_org_admin gate passed — a regular
+// member's cross-org attempt 403s before this shape is ever built, so the
+// client never has to distinguish "no org data" from "not authorized".
+
+export interface TokenAnalyticsBucket {
+  bucket_start: string
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+}
+
+export interface TokenAnalyticsTotals {
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+}
+
+export interface TokenAnalyticsSpender {
+  user: string
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+}
+
+export interface TokenAnalyticsScope {
+  totals: TokenAnalyticsTotals
+  series: TokenAnalyticsBucket[]
+}
+
+export interface TokenAnalyticsOrgScope extends TokenAnalyticsScope {
+  top_spenders: TokenAnalyticsSpender[]
+}
+
+export interface TokenAnalyticsOut {
+  bucket: "day" | "week"
+  since: string
+  until: string
+  own: TokenAnalyticsScope
+  org: TokenAnalyticsOrgScope | null
+}
+
+export function getTokenAnalytics(params: {
+  bucket?: "day" | "week"
+  from?: string
+  to?: string
+  orgId?: string
+}): Promise<TokenAnalyticsOut> {
+  const qs = new URLSearchParams()
+  if (params.bucket) qs.set("bucket", params.bucket)
+  if (params.from) qs.set("from", params.from)
+  if (params.to) qs.set("to", params.to)
+  if (params.orgId) qs.set("org_id", params.orgId)
+  const query = qs.toString()
+  return apiFetch<TokenAnalyticsOut>(`/analytics/tokens${query ? `?${query}` : ""}`)
+}
+
 // ---- Custom red-flag rule names (task 569f1d47 follow-up) ----
 // The dashboard only ever needs {name, severity} per rule id to label a
 // `custom:<uuid>` badge — not the full CRUD shape (pattern, filters, etc.).
