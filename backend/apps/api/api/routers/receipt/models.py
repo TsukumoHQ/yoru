@@ -254,6 +254,20 @@ class CliToken(SQLModel, table=True):
     # old routing-`org_id` was renamed to); this is the TENANT key.
     org_id: Optional[str] = Field(default=None, index=True)
     workspace_id: Optional[str] = Field(default=None, index=True)  # set if service — target workspace for fleet tokens
+    # Multi-dev identity model (DEC-yoru-design-ruling-1 A.3#2). Fallback ONLY
+    # — resolved to a workspace_id via _org_default_workspace_id() and used
+    # by _resolve_workspace's caller when an event matches neither
+    # workspace_repos nor route_rules, so a paired identity's unrouted events
+    # land in ITS org's default workspace instead of "Personal". Never
+    # overrides a routed match. Distinct from org_id above (the TENANT key,
+    # used unconditionally for every session) and from `workspace_id`
+    # (service tokens' fixed target) — this is an org REFERENCE resolved at
+    # use time, not a frozen workspace, so it stays correct if the org's
+    # default workspace changes later. Set at device-code approve from the
+    # org the browser session was scoped to — self-host has no membership
+    # model to derive that from yet, so it ships null there (and null
+    # everywhere until the approve flow actually carries an org context).
+    default_org_id: Optional[str] = Field(default=None, index=True)
     minted_by_user_id: Optional[str] = Field(default=None)  # audit trail
     machine_hostname: Optional[str] = Field(default=None, max_length=256)
     label: Optional[str] = Field(default=None, max_length=128)

@@ -44,7 +44,8 @@ from .billing.plan_limits import session_cap_for
 from .custom_rules import get_org_rules, scan_custom
 from .skill_safety import scan_skill_safety
 from .db import get_session
-from .deps import get_current_org, get_current_user
+from .auth_router import org_default_workspace_id
+from .deps import get_current_default_org_id, get_current_org, get_current_user
 from .models import (
     DEFAULT_ORG_ID,
     Event,
@@ -365,6 +366,7 @@ class EventsRouter:
         session: DBSession = Depends(get_session),
         current_user: str | None = Depends(get_current_user),
         current_org: str | None = Depends(get_current_org),
+        current_default_org_id: str | None = Depends(get_current_default_org_id),
     ) -> IngestAck | JSONResponse:
         """Persist a batch of events + update session aggregates atomically.
 
@@ -557,6 +559,23 @@ class EventsRouter:
                     cwd=e.cwd,
                     git_remote=e.git_remote,
                 )
+                # Multi-dev identity model (DEC-yoru-design-ruling-1 A.3#2).
+                # An event that matches neither workspace_repos nor
+                # route_rules falls back to the calling token's
+                # default_org_id (resolved to that org's default workspace)
+                # instead of going unattributed ("Personal"). NEVER runs when
+                # _resolve_workspace already matched — additive only, zero
+                # change for any event that already routes. Fails open to
+                # unrouted (None) on any resolution error — a bad/unreachable
+                # fallback must never break ingest.
+                if sess.workspace_id is None and current_default_org_id:
+                    try:
+                        sess.workspace_id = org_default_workspace_id(current_default_org_id)
+                    except Exception:
+                        self._log.warning(
+                            "events.default_org_fallback_failed",
+                            extra={"org_id": current_default_org_id},
+                        )
 
             # First user-prompt message sets the session title. Cheap
             # idempotent: only fires when sess.title is still None. Skips

@@ -196,6 +196,13 @@ def init_db() -> None:
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_cli_tokens_org_id ON cli_tokens(org_id)"
             ))
+            # Multi-dev identity model (DEC-yoru-design-ruling-1 A.3#2) —
+            # fallback-only workspace resolution, see the model docstring.
+            if "default_org_id" not in cli_cols:
+                conn.execute(text("ALTER TABLE cli_tokens ADD COLUMN default_org_id TEXT"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_cli_tokens_default_org_id ON cli_tokens(default_org_id)"
+            ))
 
         # Multi-dev identity model (DEC-yoru-design-ruling-1 A.3#1): the raw
         # machine hostname, distinct from the user-overridable `label`.

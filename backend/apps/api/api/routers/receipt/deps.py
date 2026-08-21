@@ -260,6 +260,29 @@ def get_current_org(
     return None
 
 
+def get_current_default_org_id(
+    authorization: str | None = Header(default=None),
+    session: DBSession = Depends(get_session),
+) -> str | None:
+    """Resolve the bearer token's `default_org_id` (M2, DEC-yoru-design-ruling-1
+    A.3#2) — a FALLBACK org used only when an event's routing doesn't match
+    any `workspace_repos`/`route_rules` entry. Bearer-only: API keys already
+    carry an explicit `org_id` at creation and have no separate fallback
+    concept; the cookie/dashboard path doesn't ingest events.
+    """
+    if authorization is None or not authorization.startswith(_BEARER_PREFIX):
+        return None
+    token = authorization[len(_BEARER_PREFIX):].strip()
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    row = session.exec(
+        select(HookToken).where(
+            HookToken.token_hash == token_hash,
+            HookToken.revoked_at.is_(None),  # type: ignore[union-attr]
+        )
+    ).first()
+    return row.default_org_id if row is not None else None
+
+
 def require_current_user(
     request: Request,
     authorization: str | None = Header(default=None),

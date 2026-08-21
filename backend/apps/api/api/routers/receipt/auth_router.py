@@ -138,6 +138,38 @@ def _is_local_auth() -> bool:
     return os.getenv("AUTH_PROVIDER", "local").strip().lower() != "supabase"
 
 
+def org_default_workspace_id(org_id: str) -> str:
+    """Resolve the 'Default' workspace id of an org — existing API contract
+    accepts `org_id` but new DB column is `workspace_id`. We look up the
+    default workspace row via Supabase PostgREST (RLS will enforce the
+    caller's membership).
+
+    Self-host has no Supabase `workspaces` table, so we bind to a
+    deterministic per-org local id — create/list/revoke all derive the same
+    value, keeping them consistent without any cloud call.
+
+    Module-level (not a method) so events_router can reuse it for the
+    default_org_id fallback (DEC-yoru-design-ruling-1 A.3#2) without
+    instantiating AuthRouter.
+    """
+    if _is_local_auth():
+        return f"local:{org_id}"
+    import httpx
+    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    anon = os.environ.get("SUPABASE_ANON_KEY", "")
+    resp = httpx.get(
+        f"{supabase_url}/rest/v1/workspaces",
+        headers={"apikey": anon, "Authorization": f"Bearer {anon}"},
+        params={"select": "id", "org_id": f"eq.{org_id}", "slug": "eq.default", "deleted_at": "is.null"},
+        timeout=5.0,
+    )
+    resp.raise_for_status()
+    rows = resp.json() or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="organization has no default workspace")
+    return rows[0]["id"]
+
+
 def _hash_refresh(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -806,30 +838,7 @@ class AuthRouter:
         return caller_email
 
     def _org_default_workspace_id(self, org_id: str) -> str:
-        """Resolve the 'Default' workspace id of an org for service-token
-        backward-compat: existing API contract accepts `org_id` but new DB
-        column is `workspace_id`. We look up the default workspace row via
-        Supabase PostgREST (RLS will enforce the caller's membership).
-
-        Self-host has no Supabase `workspaces` table, so we bind to a
-        deterministic per-org local id — create/list/revoke all derive the same
-        value, keeping them consistent without any cloud call."""
-        if _is_local_auth():
-            return f"local:{org_id}"
-        import httpx
-        supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-        anon = os.environ.get("SUPABASE_ANON_KEY", "")
-        resp = httpx.get(
-            f"{supabase_url}/rest/v1/workspaces",
-            headers={"apikey": anon, "Authorization": f"Bearer {anon}"},
-            params={"select": "id", "org_id": f"eq.{org_id}", "slug": "eq.default", "deleted_at": "is.null"},
-            timeout=5.0,
-        )
-        resp.raise_for_status()
-        rows = resp.json() or []
-        if not rows:
-            raise HTTPException(status_code=404, detail="organization has no default workspace")
-        return rows[0]["id"]
+        return org_default_workspace_id(org_id)
 
     def create_service_token(
         self,
