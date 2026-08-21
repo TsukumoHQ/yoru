@@ -180,6 +180,9 @@ def init_db() -> None:
                 ))
             if "machine_hostname" not in cli_cols:
                 conn.execute(text("ALTER TABLE cli_tokens ADD COLUMN machine_hostname TEXT"))
+            # Multi-dev identity model (DEC-yoru-design-ruling-1 A.3#1).
+            if "identity_label" not in cli_cols:
+                conn.execute(text("ALTER TABLE cli_tokens ADD COLUMN identity_label TEXT"))
             if "scopes" not in cli_cols:
                 conn.execute(text("ALTER TABLE cli_tokens ADD COLUMN scopes TEXT"))
             if "expires_at" not in cli_cols:
@@ -193,6 +196,18 @@ def init_db() -> None:
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_cli_tokens_org_id ON cli_tokens(org_id)"
             ))
+
+        # Multi-dev identity model (DEC-yoru-design-ruling-1 A.3#1): the raw
+        # machine hostname, distinct from the user-overridable `label`.
+        has_da = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='device_authorizations'"
+        )).first() is not None
+        if has_da:
+            da_cols = {
+                r[1] for r in conn.execute(text("PRAGMA table_info(device_authorizations)")).fetchall()
+            }
+            if "hostname" not in da_cols:
+                conn.execute(text("ALTER TABLE device_authorizations ADD COLUMN hostname TEXT"))
 
         # Multi-tenant tenant key on api_keys (M2). Additive; the table is
         # created by create_all above, so only the ALTER + index need a hand.

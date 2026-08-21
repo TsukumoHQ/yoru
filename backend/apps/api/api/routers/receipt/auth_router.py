@@ -357,6 +357,7 @@ class AuthRouter:
             user_code=user_code,
             status="pending",
             label=body.label,
+            hostname=body.hostname,
             created_at=now,
             expires_at=now + _DEVICE_CODE_TTL,
         )
@@ -482,6 +483,8 @@ class AuthRouter:
             token_type="user",
             minted_by_user_id=current_user,
             label=row.label or "cli-pair",
+            identity_label=row.label or "cli-pair",
+            machine_hostname=row.hostname,
             created_at=now,
         )
         db.add(hook_row)

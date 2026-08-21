@@ -257,6 +257,14 @@ class CliToken(SQLModel, table=True):
     minted_by_user_id: Optional[str] = Field(default=None)  # audit trail
     machine_hostname: Optional[str] = Field(default=None, max_length=256)
     label: Optional[str] = Field(default=None, max_length=128)
+    # Multi-dev identity model (DEC-yoru-design-ruling-1 A.3#1). This row IS
+    # the device/session identity — identity_label is its friendly name (the
+    # thing `yoru use` would list), distinct from the legacy `label` field
+    # other CliToken consumers (mint_token, service tokens) already depend
+    # on. Round-tripped from the same client default (`<hostname> · <os>`,
+    # init_cmd.py:_default_label) but free to diverge later (rename an
+    # identity without touching `label`'s existing contract).
+    identity_label: Optional[str] = Field(default=None, max_length=128)
     scopes: Optional[str] = Field(default=None)  # JSON: ['events:write', ...]
     created_at: datetime = Field(default_factory=_utcnow)
     last_used_at: Optional[datetime] = None
@@ -362,6 +370,10 @@ class DeviceAuthorization(SQLModel, table=True):
     user: Optional[str] = Field(default=None, index=True)
     token_hash: Optional[str] = None  # sha256 of the hook_token, for audit only
     label: Optional[str] = Field(default=None, max_length=128)
+    # Raw machine hostname (socket.gethostname(), NOT the friendly label —
+    # that's user-overridable via --label, this isn't). Carried through to
+    # CliToken.machine_hostname at approve.
+    hostname: Optional[str] = Field(default=None, max_length=256)
     created_at: datetime = Field(default_factory=_utcnow)
     expires_at: datetime = Field(index=True)
     approved_at: Optional[datetime] = None
@@ -641,6 +653,7 @@ class HookTokenMintOut(SQLModel):
 class HookTokenListItem(SQLModel):
     id: str
     label: Optional[str]
+    identity_label: Optional[str] = None
     token_type: Optional[str] = None
     machine_hostname: Optional[str] = None
     created_at: datetime
@@ -652,6 +665,7 @@ class HookTokenListItem(SQLModel):
 
 class DeviceCodeStartIn(SQLModel):
     label: Optional[str] = Field(default=None, max_length=128)
+    hostname: Optional[str] = Field(default=None, max_length=256)
 
 
 class DeviceCodeStartOut(SQLModel):

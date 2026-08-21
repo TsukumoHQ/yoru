@@ -16,6 +16,7 @@ import hashlib
 
 from apps.api.api.routers.receipt.auth_router import AuthRouter
 from apps.api.api.routers.receipt.models import (
+    CliToken,
     DeviceAuthorization,
     DeviceAuthorizationToken,
     DeviceCodeApproveIn,
@@ -36,10 +37,12 @@ def _router() -> AuthRouter:
     return AuthRouter()
 
 
-def _start(router: AuthRouter, db, label: str = "mac-air") -> tuple[str, str]:
+def _start(
+    router: AuthRouter, db, label: str = "mac-air", hostname: str | None = "mac-air"
+) -> tuple[str, str]:
     """Returns (device_code, user_code)."""
     out = router.device_code_start(
-        body=DeviceCodeStartIn(label=label),
+        body=DeviceCodeStartIn(label=label, hostname=hostname),
         request=_FakeRequest(),  # type: ignore[arg-type]
         db=db,
     )
@@ -134,6 +137,41 @@ def test_poll_unknown_device_code_returns_expired(db_session) -> None:
     result = _poll(router, db_session, "not-a-real-code")
     assert result.status == "expired"
     assert result.token is None
+
+
+def test_approve_populates_machine_hostname_and_identity_label(db_session) -> None:
+    # DEC-yoru-design-ruling-1 A.3#1 — the keystone this ticket closes:
+    # machine_hostname was always NULL, identity_label didn't exist.
+    router = _router()
+    _device_code, user_code = _start(
+        router, db_session, label="loic-macbook · darwin", hostname="loic-macbook"
+    )
+    _approve(router, db_session, user_code)
+
+    row = _cli_token_for(db_session, "alice@example.com")
+    assert row.machine_hostname == "loic-macbook"
+    assert row.identity_label == "loic-macbook · darwin"
+    # identity_label round-trips the same value as the legacy `label` field —
+    # other CliToken consumers (mint_token, service tokens) keep relying on
+    # `label` unchanged.
+    assert row.label == row.identity_label
+
+
+def test_approve_identity_label_defaults_when_no_label_sent(db_session) -> None:
+    router = _router()
+    _device_code, user_code = _start(router, db_session, label=None, hostname=None)
+    _approve(router, db_session, user_code)
+
+    row = _cli_token_for(db_session, "alice@example.com")
+    assert row.identity_label == "cli-pair"
+    assert row.machine_hostname is None
+
+
+def _cli_token_for(db, user: str) -> CliToken:
+    from sqlmodel import select
+    return db.exec(
+        select(CliToken).where(CliToken.user == user).order_by(CliToken.created_at.desc())
+    ).first()
 
 
 def _pairing_id_for(db, device_code_hash: str) -> str:
