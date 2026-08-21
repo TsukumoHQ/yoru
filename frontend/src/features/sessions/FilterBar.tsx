@@ -53,7 +53,9 @@ export function FilterBar() {
   const userParam = params.get("user") ?? ""
   const fromParam = params.get("from") ?? ""
   const toParam = params.get("to") ?? ""
-  const flagOnly = params.get("flag") === "1"
+  // Exception-first default: flagged-only unless explicitly opted out (`?flag=0`).
+  const flagOnly = params.get("flag") !== "0"
+  const flagExplicitlyOff = params.get("flag") === "0"
   const minCostParam = params.get("min_cost") ?? ""
   const workspaceParam = params.get("workspace_id") ?? ""
   const vcsParam = params.get("vcs") ?? ""
@@ -102,7 +104,7 @@ export function FilterBar() {
     !!userParam ||
     !!fromParam ||
     !!toParam ||
-    flagOnly ||
+    flagExplicitlyOff ||
     !!minCostParam ||
     !!workspaceParam ||
     !!vcsParam
@@ -218,7 +220,7 @@ export function FilterBar() {
         <input
           type="checkbox"
           checked={flagOnly}
-          onChange={(e) => setOne("flag", e.target.checked ? "1" : null)}
+          onChange={(e) => setOne("flag", e.target.checked ? null : "0")}
           className="h-4 w-4 cursor-pointer rounded-sm accent-accent-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
         />
         <span>Flagged only</span>

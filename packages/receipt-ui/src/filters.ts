@@ -26,7 +26,11 @@ export function parseFilters(params: URLSearchParams): Filters {
   if (from) f.date_from = from
   const to = params.get("to")?.trim()
   if (to) f.date_to = to
-  if (params.get("flag") === "1") f.flag_only = true
+  // Exception-first default (DEC-yoru-product-principle-1): the landing view
+  // surfaces what deviates, not a full activity firehose. flag_only defaults
+  // ON; only an explicit `?flag=0` (the FilterBar checkbox unchecked) opts
+  // into the unfiltered view.
+  f.flag_only = params.get("flag") !== "0"
   const min = params.get("min_cost")
   if (min !== null && min !== "") {
     const n = Number(min)

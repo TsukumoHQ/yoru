@@ -6,6 +6,7 @@ import { useSession } from "../auth/useSession"
 import { useInstanceConfig } from "../lib/config"
 import { FilterBar } from "../features/sessions/FilterBar"
 import { FleetStats } from "../features/sessions/FleetStats"
+import { NoExceptionsState } from "../features/sessions/NoExceptionsState"
 import { useFilters } from "../features/sessions/filters"
 import { SessionsTable } from "../features/sessions/SessionsTable"
 import { Skeleton } from "../components/ui/Skeleton"
@@ -79,6 +80,8 @@ export function SessionsListPage() {
           message={query.error instanceof Error ? query.error.message : "Failed to load sessions."}
           onRetry={() => queryClient.invalidateQueries({ queryKey: ["sessions"] })}
         />
+      ) : filters.flag_only && query.data.items.length === 0 ? (
+        <NoExceptionsState />
       ) : (
         <SessionsTable
           sessions={query.data.items}

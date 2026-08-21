@@ -6,15 +6,19 @@ import { useFilters } from "../features/sessions/filters"
 import { FilterBar } from "../features/sessions/FilterBar"
 import { ActivityRow } from "../features/sessions/ActivityRow"
 import { EmptySessionsState } from "../features/sessions/EmptySessionsState"
+import { NoExceptionsState } from "../features/sessions/NoExceptionsState"
 import { Skeleton } from "../components/ui/Skeleton"
 import type { ActivityList } from "../types/receipt"
 
 const PAGE = 40
 
-// Group-scoped activity feed: what agents DID, action by action, newest first.
-// Reuses GET /activity, which the backend scopes to own + group-mates (same
-// visible_emails_sync wall as the sessions list; cross-group wall). Authed
-// dashboard only — never the public /s/:id surface.
+// Group-scoped activity feed: exceptions (flagged activity) by default —
+// DEC-yoru-product-principle-1, exception-first not activity-first. Full,
+// unfiltered action-by-action history is an explicit drill-down (uncheck
+// "Flagged only" in FilterBar / filters.ts flag_only). Reuses GET /activity,
+// which the backend scopes to own + group-mates (same visible_emails_sync
+// wall as the sessions list; cross-group wall). Authed dashboard only —
+// never the public /s/:id surface.
 export function FeedPage() {
   const filters = useFilters()
   const orgId = useSelectedOrgId()
@@ -56,8 +60,8 @@ export function FeedPage() {
       <header className="border-b border-dashed border-rule pb-4">
         <h1 className="font-mono text-2xl font-semibold text-ink">Activity</h1>
         <p className="mt-1 font-mono text-caption text-ink-muted">
-          What your agents are doing — tool calls, file edits, and red flags,
-          newest first.
+          Exceptions first: red flags and cost/token anomalies, newest first.
+          Uncheck "Flagged only" below for the full activity feed.
         </p>
       </header>
 
@@ -81,7 +85,7 @@ export function FeedPage() {
           }
         />
       ) : items.length === 0 ? (
-        <EmptySessionsState />
+        filters.flag_only ? <NoExceptionsState /> : <EmptySessionsState />
       ) : (
         <>
           <ul className="divide-y divide-dashed divide-rule">
