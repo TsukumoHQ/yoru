@@ -49,6 +49,14 @@ export function dismissToast(id: string) {
   notify()
 }
 
+/** Test-only: the toast store is module-level and outlives any one render
+ *  tree, so a test suite that asserts on toast content needs a way to start
+ *  each test from empty instead of accumulating every prior test's toasts. */
+export function clearToasts() {
+  toasts = []
+  notify()
+}
+
 // Backward-compat imperative surface: existing callers do `toast.error(...)`.
 export const toast = {
   info: (title: string, body?: string) => pushToast({ kind: "info", title, body }),

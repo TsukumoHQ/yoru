@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  ApiError,
   apiFetch,
   createServiceToken,
   listMyTokens,
@@ -12,6 +13,24 @@ import {
   type UserTokenItem,
 } from "../lib/api"
 import { toast } from "../components/Toaster"
+
+// Two tabs open on the same token list can both fire a revoke for the same
+// row before either refetches — one wins, the other loses the race. The
+// backend's revoke is idempotent (204 either way) so this rarely surfaces
+// today, but treat 404/409/410 defensively as "someone already revoked it"
+// rather than a raw backend error string: it's an expected outcome of the
+// race, not a failure the operator needs to act on.
+function isAlreadyRevokedError(err: unknown): boolean {
+  return err instanceof ApiError && [404, 409, 410].includes(err.status)
+}
+
+function reportRevokeOutcome(err: unknown) {
+  if (isAlreadyRevokedError(err)) {
+    toast.info("Already revoked", "Another tab or session revoked this token first.")
+    return
+  }
+  toast.error(err instanceof Error ? err.message : "Failed to revoke token")
+}
 
 interface Organization {
   id: string
@@ -81,7 +100,12 @@ export function TokensPage() {
       toast.success("Token revoked")
       qc.invalidateQueries({ queryKey: MY_TOKENS_KEY })
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e) => {
+      reportRevokeOutcome(e)
+      // A losing race still means the token is gone — refetch so the row
+      // drops out of the active list instead of leaving a stale Revoke button.
+      if (isAlreadyRevokedError(e)) qc.invalidateQueries({ queryKey: MY_TOKENS_KEY })
+    },
   })
 
   const visibleMyTokens = showRevoked
@@ -319,7 +343,10 @@ function ServiceTokensSection({ orgId }: { orgId: string }) {
       toast.success("Token revoked")
       qc.invalidateQueries({ queryKey: SERVICE_TOKENS_KEY(orgId) })
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e) => {
+      reportRevokeOutcome(e)
+      if (isAlreadyRevokedError(e)) qc.invalidateQueries({ queryKey: SERVICE_TOKENS_KEY(orgId) })
+    },
   })
 
   const submit = (e: React.FormEvent) => {

@@ -52,6 +52,21 @@ function subscribe(cb: () => void): () => void {
   }
 }
 
+// Cross-tab sync: the native `storage` event fires in every OTHER same-origin
+// tab (never the tab that wrote the key), so a sibling tab picks up an org
+// switch without a reload. `setSelectedOrgId` already handles the writing
+// tab via its own direct call to `listeners` — this only closes the loop for
+// the tabs that didn't make the change.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e: StorageEvent) => {
+    if (e.key !== STORAGE_KEY) return
+    const next = e.newValue || null
+    if (next === currentOrgId) return
+    currentOrgId = next
+    for (const l of listeners) l()
+  })
+}
+
 /** Reactive selection for components (re-renders on change). */
 export function useSelectedOrgId(): string | null {
   return useSyncExternalStore(subscribe, getSelectedOrgId, getSelectedOrgId)
