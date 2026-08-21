@@ -1056,6 +1056,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "yoru-contract" },
 ]
 observability = [
     { name = "sentry-sdk", extra = ["fastapi"] },
@@ -1093,6 +1094,7 @@ requires-dist = [
     { name = "supabase", specifier = ">=2.9.1,<3" },
     { name = "tenacity", specifier = "==8.2.3" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.27.0" },
+    { name = "yoru-contract", marker = "extra == 'dev'", directory = "../packages/yoru-contract" },
 ]
 provides-extras = ["dev", "observability"]
 
@@ -2214,6 +2216,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/35/aeab955d6c425b227d5b7247eafb24f2653fedc32f95373a001af5dfeb9e/yarl-1.23.0-cp312-cp312-win_arm64.whl", hash = "sha256:6e87a6e8735b44816e7db0b2fbc9686932df473c826b0d9743148432e10bb9b9", size = 81879, upload-time = "2026-03-01T22:05:40.006Z" },
     { url = "https://files.pythonhosted.org/packages/69/68/c8739671f5699c7dc470580a4f821ef37c32c4cb0b047ce223a7f115757f/yarl-1.23.0-py3-none-any.whl", hash = "sha256:a2df6afe50dea8ae15fa34c9f824a3ee958d785fd5d089063d960bae1daa0a3f", size = 48288, upload-time = "2026-03-01T22:07:51.388Z" },
 ]
+
+[[package]]
+name = "yoru-contract"
+version = "0.1.0"
+source = { directory = "../packages/yoru-contract" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.10.3,<3" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "zipp"

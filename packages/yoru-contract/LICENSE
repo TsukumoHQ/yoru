@@ -1,0 +1,37 @@
+MIT License
+
+Copyright (c) 2026 Yoru authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+─────────────────────────────────────────────────────────────────────────
+
+SCOPE: `packages/yoru-contract/` — the canonical event schema + pairing wire
+types shared by the yoru-cli (MIT) and the yoru server (AGPL-3.0). This
+package is intentionally MIT: it exists so it CAN be safely imported by the
+MIT `yoru-cli` — an AGPL-adjacent contract package would poison every
+`pip install yoru-cli` the moment the CLI actually depends on it. It is not
+yet a runtime dependency of the published `yoru-cli` wheel (consumed today
+only inside this monorepo, by path); shipping it to end users requires
+either vendoring its source into the CLI wheel at release time or
+publishing it to PyPI separately — that's a release-tooling follow-up, not
+done by this package's existence alone.
+
+The SERVER (backend + dashboard + marketing + infra) is AGPL-3.0 — see the
+`LICENSE` file at the repository root and `LICENSING.md` for the rationale.

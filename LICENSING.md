@@ -7,6 +7,7 @@ Receipt is a **dual-licensed monorepo**, following the same pattern Supabase, Po
 | Part of Receipt | Path | License | What it means |
 |---|---|---|---|
 | **CLI client** | `receipt-cli/` | **MIT** | Install it anywhere. Embed it in internal tools, CI, closed-source forks. No obligation to share your changes. |
+| **Co-located contract** | `packages/yoru-contract/` | **MIT** | CanonicalEvent schema + pairing wire types shared by the CLI and the server. MIT so it's safe to import from the MIT CLI once the CLI depends on it — an AGPL-adjacent contract would poison every install. Not yet vendored into or published with the CLI wheel; today it's a monorepo-only dev dependency of the CLI, and a normal dependency of the (never pip-installed) server. |
 | **Server + dashboard + marketing site** | everything else at repo root | **AGPL-3.0** | Fork and run it for yourself — fine. Run it as a network service for other people? You must make your modified source available to those users. |
 
 ## Why this split
@@ -25,12 +26,13 @@ If you fork the server and modify it for your users, AGPL requires you to give t
 ## File boundaries (authoritative)
 
 - `receipt-cli/**` → MIT (see `receipt-cli/LICENSE`)
+- `packages/yoru-contract/**` → MIT (see `packages/yoru-contract/LICENSE`)
 - everything else → AGPL-3.0 (see `/LICENSE`)
 
 Per-file SPDX headers aren't required but are welcomed for clarity:
 
 ```python
-# SPDX-License-Identifier: MIT             (receipt-cli/ files)
+# SPDX-License-Identifier: MIT             (receipt-cli/, packages/yoru-contract/ files)
 # SPDX-License-Identifier: AGPL-3.0-only   (server / frontend / marketing)
 ```
 

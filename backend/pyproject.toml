@@ -50,6 +50,15 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.6,<0.7",
     "pip-audit>=2.7",
+    # Co-located contract (DEC-yoru-design-ruling-1 §C) — CanonicalEvent +
+    # pairing wire types, versioned once, shared with yoru-cli. dev-only:
+    # nothing in the running server imports it yet (retargeting scan_event
+    # is design doc volet B, a separate ticket) — only the drift-guard test
+    # does. Keeping it out of the production `dependencies` list also keeps
+    # it out of the Docker image's `uv sync --no-dev`, whose build context
+    # is scoped to backend/ and can't reach the sibling packages/ dir
+    # anyway (same class of fix as yoru-cli's dev-extra move).
+    "yoru-contract",
 ]
 observability = [
     "sentry-sdk[fastapi]>=2.0,<3.0",
@@ -57,6 +66,9 @@ observability = [
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+yoru-contract = { path = "../packages/yoru-contract" }
 
 [tool.ruff]
 line-length = 100
