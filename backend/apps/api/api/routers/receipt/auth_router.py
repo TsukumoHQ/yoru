@@ -583,11 +583,23 @@ class AuthRouter:
         request: Request,
         db: DBSession = Depends(get_session),
         current_user: str = Depends(require_current_user),
+        x_organization_id: str | None = Header(default=None, alias="X-Organization-Id"),
     ) -> JSONResponse:
         """Browser endpoint — authed (cookie + CSRF). User types `user_code`,
         confirms, and we bind the pending row to their identity + mint the
         hook-token. Token raw value is NOT returned here — the CLI picks it
         up on its next poll.
+
+        `X-Organization-Id` (same header convention as
+        `custom_rules_router.py`), when the browser session sent one, seeds
+        `CliToken.default_org_id` — the A.3#2/89fd589d fallback that was
+        shipped inert until now (nothing ever populated it). Trusted as-is,
+        no membership check: this only ever affects the CALLER'S OWN future
+        unrouted events' `workspace_id` (an additive routing fallback,
+        never `Session.org_id` — the actual cross-tenant read wall, which
+        `default_org_id` never touches). Absent (self-host, or a frontend
+        that hasn't wired the header yet) → stays `None`, unchanged
+        behavior from before this ticket.
         """
         row = db.exec(
             select(DeviceAuthorization).where(
@@ -627,6 +639,7 @@ class AuthRouter:
             identity_label=row.label or "cli-pair",
             machine_hostname=row.hostname,
             created_at=now,
+            default_org_id=x_organization_id,
         )
         db.add(hook_row)
 

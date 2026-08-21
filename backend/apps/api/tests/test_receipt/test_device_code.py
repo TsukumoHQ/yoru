@@ -49,12 +49,16 @@ def _start(
     return out.device_code, out.user_code
 
 
-def _approve(router: AuthRouter, db, user_code: str, user: str = "alice@example.com"):
+def _approve(
+    router: AuthRouter, db, user_code: str, user: str = "alice@example.com",
+    x_organization_id: str | None = None,
+):
     return router.device_code_approve(
         body=DeviceCodeApproveIn(user_code=user_code),
         request=_FakeRequest(),  # type: ignore[arg-type]
         db=db,
         current_user=user,
+        x_organization_id=x_organization_id,
     )
 
 
@@ -179,6 +183,28 @@ def test_poll_returns_identity_id_matching_the_minted_cli_token(db_session) -> N
 
     row = _cli_token_for(db_session, "alice@example.com")
     assert result.identity_id == row.id
+
+
+def test_approve_with_org_header_populates_default_org_id(db_session) -> None:
+    # db1bdd57 — the A.3#2/89fd589d fallback was shipped inert (nothing ever
+    # populated default_org_id). The approve page can now send it.
+    router = _router()
+    _device_code, user_code = _start(router, db_session)
+    _approve(router, db_session, user_code, x_organization_id="org-acme")
+
+    row = _cli_token_for(db_session, "alice@example.com")
+    assert row.default_org_id == "org-acme"
+
+
+def test_approve_without_org_header_leaves_default_org_id_null(db_session) -> None:
+    # Self-host / CI / a frontend that hasn't wired the header yet — unchanged
+    # behavior from before this ticket.
+    router = _router()
+    _device_code, user_code = _start(router, db_session)
+    _approve(router, db_session, user_code)  # no x_organization_id
+
+    row = _cli_token_for(db_session, "alice@example.com")
+    assert row.default_org_id is None
 
 
 def _cli_token_for(db, user: str) -> CliToken:
