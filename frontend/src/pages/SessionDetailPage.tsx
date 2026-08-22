@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, getSession, verifySession, type VerifyResult } from "../lib/api"
@@ -10,6 +10,8 @@ import { FileChangedRail } from "../features/sessions/FileChangedRail"
 import { CostSparkline } from "../features/sessions/CostSparkline"
 import { CausalReplay } from "../features/sessions/CausalReplay"
 import { Timeline } from "../features/sessions/Timeline"
+import { SummaryCard } from "../features/sessions/SummaryCard"
+import { ScorePanel } from "../features/sessions/ScorePanel"
 import { useCustomRuleInfo } from "../features/sessions/useCustomRuleInfo"
 
 export function SessionDetailPage() {
@@ -26,22 +28,6 @@ export function SessionDetailPage() {
     // continue to update; stops ONLY when the session has ended.
     refetchIntervalInBackground: false,
   })
-
-  // Anchor auto-scroll + highlight: when the URL has `#event-<id>`, scroll to
-  // that row once data is loaded, and flash it for 1.5s so it's easy to find.
-  useEffect(() => {
-    if (!query.data) return
-    const hash = window.location.hash
-    if (!hash.startsWith("#event-") && !hash.startsWith("#group-")) return
-    const target = document.querySelector(hash) as HTMLElement | null
-    if (!target) return
-    target.scrollIntoView({ behavior: "smooth", block: "center" })
-    target.classList.add("motion-safe:animate-event-flash")
-    const t = setTimeout(() => {
-      target.classList.remove("motion-safe:animate-event-flash")
-    }, 1600)
-    return () => clearTimeout(t)
-  }, [query.data])
 
   if (!id) return <NotFound />
 
@@ -68,26 +54,73 @@ function Receipt({ session }: { session: SessionDetail }) {
   // own org (not the studio super-admin's currently-selected org), so a
   // cross-org view still resolves the right org's rule names.
   const customRuleInfo = useCustomRuleInfo(session.org_id)
+  const detailsRef = useRef<HTMLDetailsElement | null>(null)
+
+  // Anchor auto-scroll + highlight: when the URL has `#event-<id>`, expand the
+  // collapsed detail section (the target row lives inside it, closed by
+  // default) THEN scroll to it and flash it for 1.5s so it's easy to find.
+  useEffect(() => {
+    const hash = window.location.hash
+    if (!hash.startsWith("#event-") && !hash.startsWith("#group-")) return
+    if (detailsRef.current) detailsRef.current.open = true
+    const target = document.querySelector(hash) as HTMLElement | null
+    if (!target) return
+    target.scrollIntoView({ behavior: "smooth", block: "center" })
+    target.classList.add("motion-safe:animate-event-flash")
+    const t = setTimeout(() => {
+      target.classList.remove("motion-safe:animate-event-flash")
+    }, 1600)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id])
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <main className="min-w-0 space-y-6">
         <SessionHero session={session} customRuleInfo={customRuleInfo} />
-        <CostPanel session={session} />
-        <IntegrityBadge sessionId={session.id} />
-        {/* Steal #4 — the run as plain-English causal steps + a copyable run
-            graph, for a compliance officer reading the trail (not a flat log).
-            Derived from the recorded event order; reads only loaded events. */}
-        <CausalReplay events={session.events ?? []} customRuleInfo={customRuleInfo} />
-        {/* TSU-55 follow-up — live step-through replay (authed dashboard only;
-            owner-side, not the dormant public viewer). Renders above the full
-            timeline so you can scrub the run, then read the detail below. */}
-        <SessionReplay events={session.events ?? []} />
-        <section
-          aria-label="Timeline"
-          className="rounded-sm border border-rule bg-surface"
-        >
-          <Timeline events={session.events ?? []} onFlagClick={noop} customRuleInfo={customRuleInfo} />
+
+        {/* The primary answer: what this session did, and how it scored.
+            Everything below is supporting evidence, not the headline. */}
+        <section aria-label="Synthesis" className="space-y-4 rounded-sm border border-rule bg-surface">
+          <SummaryCard sessionId={session.id} />
+          <div className="border-t border-dashed border-rule px-4 pb-4">
+            <ScorePanel score={session.score} />
+          </div>
         </section>
+
+        {/* Subordinate but reachable: cost + chain integrity, one compact row. */}
+        <div className="flex flex-wrap items-stretch gap-4">
+          <div className="min-w-0 flex-1">
+            <CostPanel session={session} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <IntegrityBadge sessionId={session.id} />
+          </div>
+        </div>
+
+        {/* The full log — collapsed by default (noise-on-noise per Fabien
+            CANU's critique). #event-/#group- deep-links expand this via
+            detailsRef above, then scroll+flash the target row. */}
+        <details ref={detailsRef} className="group rounded-sm border border-rule bg-surface open:pb-2">
+          <summary className="cursor-pointer select-none px-4 py-3 font-mono text-micro uppercase tracking-wider text-ink-faint hover:text-ink-muted">
+            View full detail — causal replay, step-through, timeline
+          </summary>
+          <div className="space-y-6 border-t border-dashed border-rule px-4 pt-4">
+            {/* Steal #4 — the run as plain-English causal steps + a copyable
+                run graph, for a compliance officer reading the trail (not a
+                flat log). Derived from the recorded event order; reads only
+                loaded events. */}
+            <CausalReplay events={session.events ?? []} customRuleInfo={customRuleInfo} />
+            {/* TSU-55 follow-up — live step-through replay (authed dashboard
+                only; owner-side, not the dormant public viewer). Renders
+                above the full timeline so you can scrub the run, then read
+                the detail below. */}
+            <SessionReplay events={session.events ?? []} />
+            {/* Timeline renders its own `aria-label="Timeline"` section — no
+                extra wrapper here, that would double the landmark. */}
+            <Timeline events={session.events ?? []} onFlagClick={noop} customRuleInfo={customRuleInfo} />
+          </div>
+        </details>
       </main>
       <FileChangedRail session={session} customRuleInfo={customRuleInfo} />
     </div>
