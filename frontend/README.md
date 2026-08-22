@@ -48,3 +48,27 @@ export default tseslint.config({
   },
 })
 ```
+
+## Testing
+
+Unit tests (Vitest + Testing Library):
+
+```bash
+npm run test
+```
+
+E2E screenshot tests (Playwright, hermetic — no live backend, API responses are
+mocked via `page.route`):
+
+```bash
+npm run test:e2e
+```
+
+`e2e/fixtures.ts` mocks every `/api/v1/**` call the pages make. `e2e/usage-page.spec.ts`
+and `e2e/session-detail.spec.ts` render `UsagePage` and `SessionDetailPage`, assert the
+key elements (hero, chart, dev roster, spike callout, synthesis card, collapsed detail),
+and capture a full-page screenshot to `e2e/screenshots/*.png` as a test artifact. Both
+run as part of `make test-frontend` (chained via `make test-e2e`) in the presubmit gate.
+
+Add a screenshot for a new page by writing another `e2e/*.spec.ts` alongside these two,
+reusing `mockApi` from `fixtures.ts` for hermetic route mocking.

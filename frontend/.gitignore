@@ -3,3 +3,6 @@ dist
 .env.local
 .env.*.local
 .vercel
+e2e/screenshots/
+playwright-report/
+test-results/

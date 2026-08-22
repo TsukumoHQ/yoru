@@ -11,7 +11,7 @@ MARKETING := marketing
 
 .PHONY: help install install-backend install-frontend dev dev-backend dev-frontend \
         dev-marketing build-marketing setup \
-        test test-backend test-frontend smoke lint lint-backend lint-frontend build \
+        test test-backend test-frontend test-e2e smoke lint lint-backend lint-frontend build \
         build-backend build-frontend clean down restart-backend
 
 help:
@@ -19,7 +19,7 @@ help:
 	@echo "  install   uv sync (backend) + npm ci (frontend)"
 	@echo "  setup     first-run onboarding (create admin + pick database)"
 	@echo "  dev       docker compose up (api + frontend dev server)"
-	@echo "  test      pytest (backend) + npm run test (frontend)"
+	@echo "  test      pytest (backend) + npm run test + Playwright e2e (frontend)"
 	@echo "  lint      ruff (backend) + tsc --noEmit (frontend)"
 	@echo "  build     vite build (frontend) + docker build (api)"
 	@echo "  down      docker compose down"
@@ -66,6 +66,12 @@ test-frontend:
 	@if [ -f $(FRONTEND)/package.json ] && grep -q '"test"' $(FRONTEND)/package.json; then \
 		cd $(FRONTEND) && npm run test; \
 	else echo "frontend tests not configured — skipping"; fi
+	@$(MAKE) test-e2e
+
+test-e2e:
+	@if [ -f $(FRONTEND)/package.json ] && grep -q '"test:e2e"' $(FRONTEND)/package.json; then \
+		cd $(FRONTEND) && npm run test:e2e; \
+	else echo "frontend e2e tests not configured — skipping"; fi
 
 smoke:
 	bash scripts/smoke-us14.sh
