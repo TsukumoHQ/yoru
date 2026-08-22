@@ -115,6 +115,10 @@ describe("UsagePage", () => {
         top_spenders: [
           { user: "alice@acme.dev", tokens_input: 3000, tokens_output: 1500, cost_usd: 8 },
         ],
+        by_dev: [
+          { user: "alice@acme.dev", tokens_input: 3000, tokens_output: 1500, cost_usd: 8 },
+        ],
+        by_project: [{ vcs: "github", tokens_input: 3000, tokens_output: 1500, cost_usd: 8 }],
       },
     }
     // own-scope call (no org_id) first, then the best-effort org-scoped overlay.

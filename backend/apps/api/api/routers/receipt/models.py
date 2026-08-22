@@ -902,8 +902,26 @@ class TokenAnalyticsScope(SQLModel):
     series: list[TokenAnalyticsBucket]
 
 
+class TokenAnalyticsProject(SQLModel):
+    """Spend grouped by VCS provider — never by raw repo path. `vcs` is the
+    same derived provider slug (github|gitlab|bitbucket|azure) SessionListItem
+    exposes; git_remote itself is never surfaced by this or any other API
+    response (see PublicSessionOut's redaction note above). None = sessions
+    with no git remote, or one pointing at an unrecognized/self-hosted host."""
+    vcs: Optional[str]
+    tokens_input: int
+    tokens_output: int
+    cost_usd: float
+
+
 class TokenAnalyticsOrgScope(TokenAnalyticsScope):
     top_spenders: list[TokenAnalyticsSpender]
+    # Full roster (org_id cost-control drill, CTO org-restructure directive
+    # 2026-08-21) — top_spenders above stays capped at _TOP_SPENDERS_LIMIT for
+    # back-compat with the existing "Exceptions" panel; by_dev is every dev
+    # with usage in range, for a sortable full-roster table.
+    by_dev: list[TokenAnalyticsSpender]
+    by_project: list[TokenAnalyticsProject]
 
 
 class TokenAnalyticsOut(SQLModel):
@@ -913,6 +931,25 @@ class TokenAnalyticsOut(SQLModel):
     own: TokenAnalyticsScope
     # None unless `org_id` was requested AND the caller passed the admin gate.
     org: Optional[TokenAnalyticsOrgScope] = None
+
+
+class TokenAnalyticsSessionItem(SQLModel):
+    """One row of the by-session drill (GET /analytics/tokens/sessions).
+    `vcs` follows the same provider-only redaction rule as TokenAnalyticsProject."""
+    id: str
+    user: str
+    vcs: Optional[str]
+    started_at: datetime
+    tokens_input: int
+    tokens_output: int
+    cost_usd: float
+
+
+class TokenAnalyticsSessionsOut(SQLModel):
+    items: list[TokenAnalyticsSessionItem]
+    # Count of every row matching the filter, BEFORE `limit` truncation — lets
+    # the UI show "showing 50 of 340" instead of silently looking complete.
+    total: int
 
 
 # ---------- Exceptions (red-flag) analytics (5a72353b) ----------

@@ -1138,8 +1138,22 @@ export interface TokenAnalyticsScope {
   series: TokenAnalyticsBucket[]
 }
 
+// Spend grouped by VCS provider only — never a raw repo path. `vcs` is the
+// same derived provider slug (github|gitlab|bitbucket|azure) session list
+// items expose; git_remote itself is never surfaced by any API response.
+export interface TokenAnalyticsProject {
+  vcs: string | null
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+}
+
 export interface TokenAnalyticsOrgScope extends TokenAnalyticsScope {
   top_spenders: TokenAnalyticsSpender[]
+  // Full dev roster (org cost-control drill, 8c5d82ad) — top_spenders above
+  // stays capped at 10 for the existing Exceptions panel.
+  by_dev: TokenAnalyticsSpender[]
+  by_project: TokenAnalyticsProject[]
 }
 
 export interface TokenAnalyticsOut {
@@ -1163,6 +1177,44 @@ export function getTokenAnalytics(params: {
   if (params.orgId) qs.set("org_id", params.orgId)
   const query = qs.toString()
   return apiFetch<TokenAnalyticsOut>(`/analytics/tokens${query ? `?${query}` : ""}`)
+}
+
+// GET /analytics/tokens/sessions — by-session drill (8c5d82ad). Own-scope
+// (no orgId) is always allowed; org_id requires org-admin, same gate as
+// getTokenAnalytics's org scope.
+export interface TokenAnalyticsSessionItem {
+  id: string
+  user: string
+  vcs: string | null
+  started_at: string
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+}
+
+export interface TokenAnalyticsSessionsOut {
+  items: TokenAnalyticsSessionItem[]
+  // Count of every row matching the filter, BEFORE `limit` truncation.
+  total: number
+}
+
+export function getTokenAnalyticsSessions(params: {
+  from?: string
+  to?: string
+  orgId?: string
+  dev?: string
+  project?: string
+  limit?: number
+}): Promise<TokenAnalyticsSessionsOut> {
+  const qs = new URLSearchParams()
+  if (params.from) qs.set("from", params.from)
+  if (params.to) qs.set("to", params.to)
+  if (params.orgId) qs.set("org_id", params.orgId)
+  if (params.dev) qs.set("dev", params.dev)
+  if (params.project) qs.set("project", params.project)
+  if (params.limit) qs.set("limit", String(params.limit))
+  const query = qs.toString()
+  return apiFetch<TokenAnalyticsSessionsOut>(`/analytics/tokens/sessions${query ? `?${query}` : ""}`)
 }
 
 // ---- Custom red-flag rule names (task 569f1d47 follow-up) ----
