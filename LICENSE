@@ -20,11 +20,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 The full AGPL-3.0 text is at https://www.gnu.org/licenses/agpl-3.0.txt
 
-SCOPE: This license applies to the Receipt server — backend (`backend/`),
+SCOPE: This license applies to the yoru server — backend (`backend/`),
 dashboard (`frontend/`), marketing site (`marketing/`), and all supporting
 infrastructure code at the repository root.
 
-EXCEPTION — the CLI client is MIT-licensed. See `receipt-cli/LICENSE`.
+EXCEPTION — the CLI client is MIT-licensed. See `yoru-cli/LICENSE`.
 
 If you self-host the server (modified or unmodified) and provide it as a
 network service, the AGPL requires you to make the corresponding source
