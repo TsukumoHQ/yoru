@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgIdentitiesPage, identityException, multiMachineUsers } from "./OrgIdentitiesPage"
@@ -79,9 +79,17 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  // Fixture last_used_at/created_at values are fixed calendar dates; pin the
+  // clock so device-urgency's idle-day math stays stable as real time moves on.
+  vi.useFakeTimers({ toFake: ["Date"] })
+  vi.setSystemTime(new Date("2026-08-25T00:00:00Z"))
   mockedListOrganizations.mockReset()
   mockedGetOrgIdentities.mockReset()
   mockedListOrganizations.mockResolvedValue([ORG])
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe("identityException", () => {

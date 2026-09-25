@@ -72,6 +72,7 @@ def _unique_email(prefix: str = "e2e-auth") -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}@test.local"
 
 
+@pytest.mark.integration
 def test_unauth_mint_rejected(http: httpx.Client) -> None:
     """CVE regression guard: minting a hook-token with NO authentication must
     be rejected. The pre-hardening endpoint trusted `body.user` and minted a
@@ -89,6 +90,7 @@ def test_unauth_mint_rejected(http: httpx.Client) -> None:
     )
 
 
+@pytest.mark.integration
 def test_unknown_bearer_rejected(http: httpx.Client) -> None:
     """A syntactically valid `rcpt_*` bearer that isn't in the DB must be
     rejected by the caller-scoped list endpoint.
@@ -101,6 +103,7 @@ def test_unknown_bearer_rejected(http: httpx.Client) -> None:
     assert me.status_code == 401, me.text
 
 
+@pytest.mark.integration
 def test_unauth_list_and_logout_rejected(http: httpx.Client) -> None:
     """The caller-scoped list and the logout endpoint both require auth — an
     unauthenticated request to either is rejected.

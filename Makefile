@@ -31,7 +31,7 @@ setup:  ## First-run onboarding — create the admin account + pick a database
 	cd $(BACKEND) && uv run python scripts/setup.py
 
 install-backend:
-	cd $(BACKEND) && uv sync
+	cd $(BACKEND) && uv sync --extra dev
 
 install-frontend:
 	@if [ -f $(FRONTEND)/package.json ]; then cd $(FRONTEND) && npm ci; \
@@ -60,11 +60,11 @@ build-marketing:
 test: test-backend test-frontend
 
 test-backend:
-	cd $(BACKEND) && uv run pytest
+	cd $(BACKEND) && uv sync --extra dev -q && uv run pytest
 
 test-frontend:
 	@if [ -f $(FRONTEND)/package.json ] && grep -q '"test"' $(FRONTEND)/package.json; then \
-		cd $(FRONTEND) && npm run test; \
+		cd $(FRONTEND) && ([ -d node_modules ] || npm ci) && npm run test; \
 	else echo "frontend tests not configured — skipping"; fi
 	@$(MAKE) test-e2e
 

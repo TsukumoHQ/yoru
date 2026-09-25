@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
@@ -77,6 +77,10 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  // Fixture last_used_at/created_at values are fixed calendar dates; pin the
+  // clock so device-urgency's idle-day math stays stable as real time moves on.
+  vi.useFakeTimers({ toFake: ["Date"] })
+  vi.setSystemTime(new Date("2026-08-25T00:00:00Z"))
   mockedApiFetch.mockReset()
   mockedListMyTokens.mockReset()
   mockedListServiceTokens.mockReset()
@@ -86,6 +90,10 @@ beforeEach(() => {
   mockedListServiceTokens.mockResolvedValue([])
   vi.spyOn(window, "confirm").mockReturnValue(true)
   clearToasts()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe("TokensPage", () => {
