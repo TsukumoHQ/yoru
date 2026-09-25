@@ -361,7 +361,7 @@ def test_crud_requires_auth(client):
     assert client.get("/api/v1/orgs/org-acme/red-flag-rules").status_code == 401
 
 
-def test_member_creates_lists_and_deletes_own_org_rule(client, mint_token, monkeypatch):
+def test_member_creates_and_lists_own_org_rule(client, mint_token, monkeypatch):
     monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
         profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
         memberships=[{"user_id": "u2", "org_id": "org-acme"}],
@@ -382,11 +382,46 @@ def test_member_creates_lists_and_deletes_own_org_rule(client, mint_token, monke
     assert resp.status_code == 200
     assert [r["id"] for r in resp.json()] == [rule_id]
 
-    resp = client.delete(
-        f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}", headers=headers
+
+def test_member_delete_is_403_owner_admin_deletes(client, mint_token, monkeypatch):
+    """vuln-0009 (strix pilot bb1f35fc, pinned): a plain member must not be
+    able to delete another member's — or the owner's — red-flag rule. Only
+    owner/admin role in that org may delete it."""
+    store = _FakeStore(
+        profiles=[
+            {"id": "u1", "email": "owner@acme.dev", "role": "user"},
+            {"id": "u2", "email": "dev@acme.dev", "role": "user"},
+        ],
+        memberships=[
+            {"user_id": "u1", "org_id": "org-acme", "role": "owner"},
+            {"user_id": "u2", "org_id": "org-acme", "role": "member"},
+        ],
     )
-    assert resp.status_code == 204
-    resp = client.get("/api/v1/orgs/org-acme/red-flag-rules", headers=headers)
+    monkeypatch.setattr(_V, "get_data_store", lambda: store)
+
+    owner_raw, owner_headers = mint_token("owner@acme.dev")
+    resp = client.post(
+        "/api/v1/orgs/org-acme/red-flag-rules",
+        headers=owner_headers,
+        json={"name": "no-force-push", "match_type": "contains",
+              "pattern": "push --force", "severity": "high"},
+    )
+    assert resp.status_code == 201, resp.text
+    rule_id = resp.json()["id"]
+
+    _member_raw, member_headers = mint_token("dev@acme.dev")
+    resp = client.delete(
+        f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}", headers=member_headers
+    )
+    assert resp.status_code == 403, resp.text
+    resp = client.get("/api/v1/orgs/org-acme/red-flag-rules", headers=owner_headers)
+    assert [r["id"] for r in resp.json()] == [rule_id]  # still there
+
+    resp = client.delete(
+        f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}", headers=owner_headers
+    )
+    assert resp.status_code == 204, resp.text
+    resp = client.get("/api/v1/orgs/org-acme/red-flag-rules", headers=owner_headers)
     assert resp.json() == []
 
 

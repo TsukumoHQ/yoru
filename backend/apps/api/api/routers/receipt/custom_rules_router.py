@@ -5,10 +5,14 @@ scope here, per AC) — these are plain JSON endpoints today.
 Org-wall pattern matches M5 (``export_router.export_org_audit``): the path
 ``org_id`` is authoritative, a member outside their org set gets 404 (never
 403 — an invisible tenant must be indistinguishable from a nonexistent one),
-the studio super-admin may target any org via ``X-Organization-Id``. There is
-no per-org-admin role wired yet anywhere in this codebase (documented gap,
-``visibility.py``) — write access here is scoped the same as every other
-org-write path: org membership, not a separate admin tier.
+the studio super-admin may target any org via ``X-Organization-Id``.
+
+DELETE is owner/admin-gated (vuln-0009, strix pilot bb1f35fc): a plain
+member could delete another member's — including the owner's — rule. Uses
+the existing ``full_org_ids`` (owner/admin org subset) already computed by
+``visible_scope_sync`` for the read-scoping wall, via ``_wall_admin`` below.
+create_rule/update_rule remain membership-scoped only (unchanged; flagged as
+a follow-up in the PR, not fixed here — narrower change, matches the AC).
 """
 from __future__ import annotations
 
@@ -29,6 +33,22 @@ def _wall(current_user: str, org_id: str, x_organization_id: str | None) -> None
     _visible, orgs, _full = visible_scope_sync(current_user, x_organization_id)
     if orgs is not None and org_id not in orgs:
         raise HTTPException(status_code=404, detail="organization not found")
+
+
+def _wall_admin(current_user: str, org_id: str, x_organization_id: str | None) -> None:
+    """Like ``_wall``, plus requires owner/admin role in ``org_id``.
+
+    Tenancy failure (org invisible to caller) still 404s, matching ``_wall``
+    — an invisible tenant must stay indistinguishable from a nonexistent one.
+    A visible org the caller merely lacks owner/admin role in 403s: that's a
+    role failure, not a tenancy one.
+    """
+    from apps.api.api.services.access.visibility import visible_scope_sync
+    _visible, orgs, full = visible_scope_sync(current_user, x_organization_id)
+    if orgs is not None and org_id not in orgs:
+        raise HTTPException(status_code=404, detail="organization not found")
+    if orgs is not None and org_id not in full:
+        raise HTTPException(status_code=403, detail="owner or admin role required")
 
 
 # CustomRule columns that are NOT NULL. CustomRuleUpdate declares every field
@@ -156,7 +176,7 @@ class CustomRulesRouter:
         current_user: str = Depends(require_current_user),
         x_organization_id: str | None = Header(None, alias="X-Organization-Id"),
     ) -> None:
-        _wall(current_user, org_id, x_organization_id)
+        _wall_admin(current_user, org_id, x_organization_id)
         row = db.get(CustomRule, rule_id)
         if row is None or row.org_id != org_id:
             raise HTTPException(status_code=404, detail="rule not found")

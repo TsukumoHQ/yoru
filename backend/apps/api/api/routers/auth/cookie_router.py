@@ -77,7 +77,16 @@ _CSRF_PATH = "/"
 
 
 def _cookie_secure() -> bool:
-    """True in production (HTTPS), false for local dev (http://localhost)."""
+    """True in production (HTTPS), false for local dev (http://localhost).
+
+    ``ENVIRONMENT=prod``/``production`` forces Secure regardless of
+    ``COOKIE_SECURE`` (vuln-0004, strix pilot bb1f35fc) — mirrors the
+    ``AUTH_JWT_SECRET`` fail-fast precedent (``auth_router.py``) so a prod
+    deploy (fly.toml sets ``ENVIRONMENT=production``) can't silently ship
+    session cookies without Secure by omitting ``COOKIE_SECURE``.
+    """
+    if os.getenv("ENVIRONMENT", "").strip().lower() in ("prod", "production"):
+        return True
     return os.getenv("COOKIE_SECURE", "false").lower() in ("1", "true", "yes")
 
 

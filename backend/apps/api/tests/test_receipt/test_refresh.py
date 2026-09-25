@@ -86,6 +86,25 @@ def test_refresh_happy_rotate(client: TestClient, db_session: Session) -> None:
     assert r.cookies.get("refresh_token") == body["refresh_token"]
 
 
+def test_refresh_cookie_secure_in_production(
+    client: TestClient, db_session: Session, monkeypatch
+) -> None:
+    """vuln-0004 (strix pilot bb1f35fc, pinned): this cookie used to hardcode
+    secure=False unconditionally — ship it here, outside dev, and it must
+    carry Secure (+ HttpOnly, SameSite)."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    raw, _old_hash = _seed_refresh(db_session, "alice@example.com")
+
+    r = client.post("/api/v1/auth/refresh", cookies={"refresh_token": raw})
+    assert r.status_code == 200, r.text
+
+    set_cookie_headers = r.headers.get_list("set-cookie")
+    refresh_cookie = next(h for h in set_cookie_headers if h.startswith("refresh_token="))
+    assert "Secure" in refresh_cookie
+    assert "HttpOnly" in refresh_cookie
+    assert "samesite=lax" in refresh_cookie.lower()
+
+
 def test_refresh_expired_401(client: TestClient, db_session: Session) -> None:
     family_id = uuid.uuid4().hex
     # Seed one expired-but-not-revoked row AND one live sibling in the same

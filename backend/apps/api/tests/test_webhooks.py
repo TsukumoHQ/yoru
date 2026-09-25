@@ -98,6 +98,33 @@ def test_create_webhook_happy_path(client, mint):
     assert len(body["id"]) == 32  # uuid4 hex
 
 
+def test_secret_stored_encrypted_not_plaintext(client, mint, engine):
+    """vuln-0010 (strix pilot bb1f35fc, pinned): the raw secret is returned
+    ONCE in the create response, but the DB row must never hold it in
+    plaintext — only the encrypted-at-rest value."""
+    from apps.api.api.models.webhooks import WebhookSubscription
+    from apps.api.api.services.webhook.webhook_secret_crypto import decrypt_secret
+
+    h = mint("alice@example.com")
+    r = client.post(
+        "/api/v1/webhooks",
+        headers=h,
+        json={
+            "url": "https://hooks.example.com/incoming",
+            "events_filter": ["session.completed"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    raw_secret = r.json()["secret"]
+    webhook_id = r.json()["id"]
+
+    with Session(engine) as s:
+        row = s.get(WebhookSubscription, webhook_id)
+        assert row is not None
+        assert row.secret != raw_secret  # not plaintext at rest
+        assert decrypt_secret(row.secret) == raw_secret  # reversible
+
+
 def test_list_hides_other_users_subscriptions(client, mint):
     alice = mint("alice@example.com")
     bob = mint("bob@example.com")

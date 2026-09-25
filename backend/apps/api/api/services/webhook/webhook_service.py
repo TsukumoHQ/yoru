@@ -26,6 +26,10 @@ from apps.api.api.models.webhook.webhook_models import (
     WebhookResponse,
     WebhookListResponse,
 )
+from apps.api.api.services.webhook.webhook_secret_crypto import (
+    decrypt_secret,
+    encrypt_secret,
+)
 from apps.api.api.services.webhook.webhook_signature import generate_webhook_secret
 
 
@@ -76,13 +80,14 @@ class WebhookService:
         self.logger.log_info("Creating webhook", context)
 
         try:
-            # Générer secret HMAC
+            # Générer secret HMAC (vuln-0010: only the raw value in-memory
+            # here is ever put in a response — the row stores it encrypted).
             secret = generate_webhook_secret()
 
             webhook_data = {
                 "user_id": str(user_id),
                 "url": data.url,
-                "secret": secret,
+                "secret": encrypt_secret(secret),
                 "events": data.events,
                 "active": data.active,
                 "retry_count": 0,
@@ -96,7 +101,7 @@ class WebhookService:
                 "Webhook created successfully",
                 {**context, "webhook_id": result.get("id")},
             )
-            return WebhookResponse(**result)
+            return WebhookResponse(**{**result, "secret": secret})
 
         except Exception as e:
             context["error"] = str(e)
@@ -144,7 +149,8 @@ class WebhookService:
                 raise NotFoundError("Webhook not found", correlation_id)
 
             self.logger.log_info("Webhook retrieved successfully", context)
-            return WebhookResponse(**webhook)
+            # vuln-0010: never return the stored (encrypted) secret past creation.
+            return WebhookResponse(**{**webhook, "secret": None})
 
         except NotFoundError:
             raise
@@ -152,6 +158,22 @@ class WebhookService:
             context["error"] = str(e)
             self.logger.log_error("Failed to get webhook", context)
             raise
+
+    async def get_webhook_secret(
+        self,
+        webhook_id: UUID,
+        user_id: UUID,
+        correlation_id: str = "",
+    ) -> str:
+        """Internal-only: the DECRYPTED signing secret for a webhook the
+        caller owns (test-delivery signing). Never route this through an API
+        response — ``get_webhook``/``list_webhooks`` redact it (vuln-0010)."""
+        webhook = self.supabase.get_record(
+            "webhooks", str(webhook_id), correlation_id=correlation_id
+        )
+        if not webhook or webhook["user_id"] != str(user_id):
+            raise NotFoundError("Webhook not found", correlation_id)
+        return decrypt_secret(webhook["secret"])
 
     async def list_webhooks(
         self,
@@ -216,7 +238,10 @@ class WebhookService:
             total_pages = ceil(total / page_size) if total > 0 else 0
             has_more = page < total_pages
 
-            items = [WebhookResponse(**webhook) for webhook in webhooks]
+            # vuln-0010: never return the stored (encrypted) secret in a list.
+            items = [
+                WebhookResponse(**{**webhook, "secret": None}) for webhook in webhooks
+            ]
 
             self.logger.log_info(
                 f"Retrieved {len(items)} webhooks",
@@ -293,7 +318,8 @@ class WebhookService:
             )
 
             self.logger.log_info("Webhook updated successfully", context)
-            return WebhookResponse(**updated)
+            # vuln-0010: never return the stored (encrypted) secret on update.
+            return WebhookResponse(**{**updated, "secret": None})
 
         except NotFoundError:
             raise
@@ -382,18 +408,20 @@ class WebhookService:
             # Verify ownership first
             await self.get_webhook(webhook_id, user_id, correlation_id)
 
-            # Generate new secret
+            # Generate new secret (vuln-0010: stored encrypted; raw value
+            # only ever appears in THIS response, same one-time-reveal
+            # contract as create_webhook).
             new_secret = generate_webhook_secret()
 
             updated = self.supabase.update_record(
                 "webhooks",
                 str(webhook_id),
-                {"secret": new_secret},
+                {"secret": encrypt_secret(new_secret)},
                 correlation_id=correlation_id,
             )
 
             self.logger.log_info("Webhook secret regenerated successfully", context)
-            return WebhookResponse(**updated)
+            return WebhookResponse(**{**updated, "secret": new_secret})
 
         except NotFoundError:
             raise
@@ -472,7 +500,9 @@ class WebhookService:
                 job = {
                     "webhook_id": webhook["id"],
                     "url": webhook["url"],
-                    "secret": webhook["secret"],
+                    # vuln-0010: the row stores the secret encrypted; decrypt
+                    # only here, on the outbound-signing path.
+                    "secret": decrypt_secret(webhook["secret"]),
                     "event": event_name,
                     "payload": payload,
                     "correlation_id": correlation_id,

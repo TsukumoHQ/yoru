@@ -284,8 +284,13 @@ class TestTriggerWebhook:
     async def test_trigger_webhook_enqueues_jobs(
         self, webhook_service, mock_supabase, mock_redis
     ):
-        """Test that trigger_webhook enqueues jobs for matching webhooks."""
+        """Test that trigger_webhook enqueues jobs for matching webhooks,
+        decrypting the at-rest secret (vuln-0010, pinned) back to its raw
+        value for the outbound-signing job — the row itself never holds
+        plaintext."""
         # Arrange
+        from apps.api.api.services.webhook.webhook_secret_crypto import encrypt_secret
+
         webhook_id_1 = str(uuid.uuid4())
         webhook_id_2 = str(uuid.uuid4())
 
@@ -294,13 +299,13 @@ class TestTriggerWebhook:
             {
                 "id": webhook_id_1,
                 "url": "https://example1.com/webhook",
-                "secret": "secret1",
+                "secret": encrypt_secret("secret1"),
                 "events": ["user.created"],
             },
             {
                 "id": webhook_id_2,
                 "url": "https://example2.com/webhook",
-                "secret": "secret2",
+                "secret": encrypt_secret("secret2"),
                 "events": ["user.created"],
             },
         ]
@@ -323,6 +328,10 @@ class TestTriggerWebhook:
         # Assert
         assert result == 2  # Two webhooks enqueued
         assert mock_redis.push_to_queue.call_count == 2
+        queued_secrets = {
+            call.args[1]["secret"] for call in mock_redis.push_to_queue.call_args_list
+        }
+        assert queued_secrets == {"secret1", "secret2"}  # decrypted, not ciphertext
 
     @pytest.mark.asyncio
     async def test_trigger_webhook_no_matching_webhooks(
@@ -351,3 +360,129 @@ class TestTriggerWebhook:
         # Assert
         assert result == 0
         mock_redis.push_to_queue.assert_not_called()
+
+
+class TestSecretNeverReturnedPastCreation:
+    """vuln-0010 (strix pilot bb1f35fc, pinned): the webhook signing secret
+    is shown ONCE, on create (or regenerate) — get/list/update must not
+    return it, and the row itself is never plaintext."""
+
+    @pytest.mark.asyncio
+    async def test_create_returns_raw_secret_but_stores_it_encrypted(
+        self, webhook_service, sample_user_id, mock_supabase
+    ):
+        webhook_data = WebhookCreate(
+            url="https://example.com/webhook", events=["user.created"], active=True
+        )
+        captured = {}
+
+        def _insert_record(table, data, correlation_id=""):
+            captured.update(data)
+            return {
+                "id": str(uuid.uuid4()),
+                "user_id": str(sample_user_id),
+                "url": data["url"],
+                "secret": data["secret"],
+                "events": data["events"],
+                "active": data["active"],
+                "retry_count": 0,
+                "last_attempt_at": None,
+                "last_success_at": None,
+                "last_error": None,
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+            }
+
+        mock_supabase.insert_record.side_effect = _insert_record
+
+        result = await webhook_service.create_webhook(
+            user_id=sample_user_id, data=webhook_data, correlation_id="test"
+        )
+
+        assert result.secret is not None
+        assert captured["secret"] != result.secret  # stored value is ciphertext
+
+    @pytest.mark.asyncio
+    async def test_get_list_update_redact_secret(
+        self, webhook_service, sample_user_id, sample_webhook_id, mock_supabase
+    ):
+        row = {
+            "id": str(sample_webhook_id),
+            "user_id": str(sample_user_id),
+            "url": "https://example.com/webhook",
+            "secret": "ciphertext-not-a-real-fernet-token",
+            "events": ["user.created"],
+            "active": True,
+            "retry_count": 0,
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "last_error": None,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+        }
+        mock_supabase.get_record.return_value = row
+
+        got = await webhook_service.get_webhook(
+            webhook_id=sample_webhook_id, user_id=sample_user_id, correlation_id="t"
+        )
+        assert got.secret is None
+
+        mock_response = MagicMock()
+        mock_response.count = 1
+        mock_query = MagicMock()
+        mock_query.select.return_value = mock_query
+        mock_query.match.return_value = mock_query
+        mock_query.order.return_value = mock_query
+        mock_query.range.return_value = mock_query
+        mock_query.execute.return_value = mock_response
+        mock_query.execute.return_value.data = [row]
+        mock_supabase.client.table.return_value = mock_query
+
+        listed = await webhook_service.list_webhooks(
+            user_id=sample_user_id, correlation_id="t"
+        )
+        assert all(item.secret is None for item in listed.items)
+
+        mock_supabase.update_record.return_value = {**row, "active": False}
+        updated = await webhook_service.update_webhook(
+            webhook_id=sample_webhook_id,
+            user_id=sample_user_id,
+            data=WebhookUpdate(active=False),
+            correlation_id="t",
+        )
+        assert updated.secret is None
+
+    @pytest.mark.asyncio
+    async def test_regenerate_secret_returns_new_raw_once(
+        self, webhook_service, sample_user_id, sample_webhook_id, mock_supabase
+    ):
+        existing = {
+            "id": str(sample_webhook_id),
+            "user_id": str(sample_user_id),
+            "url": "https://example.com/webhook",
+            "secret": "old-ciphertext",
+            "events": ["user.created"],
+            "active": True,
+            "retry_count": 0,
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "last_error": None,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+        }
+        mock_supabase.get_record.return_value = existing
+        captured = {}
+
+        def _update_record(table, wid, data, correlation_id=""):
+            captured.update(data)
+            return {**existing, **data}
+
+        mock_supabase.update_record.side_effect = _update_record
+
+        result = await webhook_service.regenerate_secret(
+            webhook_id=sample_webhook_id, user_id=sample_user_id, correlation_id="t"
+        )
+
+        assert result.secret is not None
+        assert result.secret != existing["secret"]
+        assert captured["secret"] != result.secret  # stored value is ciphertext

@@ -31,6 +31,7 @@ from sqlmodel import Session as DBSession
 from sqlmodel import select
 
 from apps.api.api.dependencies.auth import SESSION_COOKIE_NAME
+from apps.api.api.routers.auth.cookie_router import _cookie_secure
 from apps.api.api.services.auth.provider import get_auth_provider
 from libs.datastore import get_data_store
 
@@ -1276,7 +1277,11 @@ class AuthRouter:
             max_age=int(_REFRESH_TTL.total_seconds()),
             httponly=True,
             samesite="lax",
-            secure=False,  # dev — TLS termination handles secure=True in prod
+            # vuln-0004 (strix pilot bb1f35fc): was hardcoded False — no TLS
+            # termination sets a cookie attribute, that was just wrong.
+            # Reuses cookie_router's dev/prod resolution (Secure whenever
+            # ENVIRONMENT=production, or COOKIE_SECURE is set).
+            secure=_cookie_secure(),
         )
         return response
 

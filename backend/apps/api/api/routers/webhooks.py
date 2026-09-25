@@ -20,6 +20,7 @@ from sqlmodel import Session as DBSession, select
 from apps.api.api.models.webhooks import WebhookSubscription, _naive_utcnow
 from apps.api.api.routers.receipt.db import get_session
 from apps.api.api.routers.receipt.deps import require_current_user
+from apps.api.api.services.webhook.webhook_secret_crypto import encrypt_secret
 
 _MAX_PER_USER = 5
 _VALID_EVENTS = {"session.completed", "session.flagged"}
@@ -97,7 +98,7 @@ class WebhooksRouter:
         row = WebhookSubscription(
             user=current_user,
             url=str(body.url),
-            secret=secret,
+            secret=encrypt_secret(secret),  # vuln-0010: never store raw
             events_filter=list(body.events_filter),
             created_at=_naive_utcnow(),
         )
@@ -108,7 +109,7 @@ class WebhooksRouter:
             id=row.id,
             url=row.url,
             events_filter=row.events_filter,
-            secret=row.secret,
+            secret=secret,  # raw — shown ONCE, here, never again
         )
 
     def list_webhooks(

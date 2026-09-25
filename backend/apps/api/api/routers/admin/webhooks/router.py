@@ -344,8 +344,15 @@ class AdminWebhooksRouter:
                 {"webhook_id": str(webhook_id), "test": True},
             )
 
-            # Generate signature
-            signature = generate_webhook_signature(test_payload, webhook.secret)
+            # Generate signature (vuln-0010: webhook.secret is redacted on
+            # get_webhook's response — the decrypted value comes from the
+            # internal-only get_webhook_secret instead).
+            secret = await service.get_webhook_secret(
+                webhook_id=webhook_id,
+                user_id=admin_id,
+                correlation_id=correlation_id,
+            )
+            signature = generate_webhook_signature(test_payload, secret)
 
             # Send test request
             start_time = time.time()

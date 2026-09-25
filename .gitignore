@@ -74,6 +74,9 @@ backend/data/*.json
 # Local-auth JWT signing secret (auto-generated, machine-local — NEVER commit)
 backend/data/.auth_jwt_secret
 
+# Webhook-secret-at-rest encryption key (auto-generated, machine-local — NEVER commit)
+backend/data/.webhook_secret_key
+
 # Embedding cache (trovex / fastembed)
 .fastembed_cache/
 .vercel

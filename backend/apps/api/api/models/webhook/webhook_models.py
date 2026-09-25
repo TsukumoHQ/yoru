@@ -87,9 +87,13 @@ class WebhookResponse(WebhookBase):
 
     id: UUID
     user_id: UUID
-    secret: str = Field(
-        ...,
-        description="Secret HMAC pour vérification des signatures (à stocker côté client)",
+    secret: str | None = Field(
+        None,
+        description=(
+            "Secret HMAC pour vérification des signatures (à stocker côté "
+            "client) — présent UNIQUEMENT sur la réponse de création ou de "
+            "régénération (vuln-0010); jamais renvoyé sur get/list/update."
+        ),
     )
     retry_count: int = Field(
         default=0,
