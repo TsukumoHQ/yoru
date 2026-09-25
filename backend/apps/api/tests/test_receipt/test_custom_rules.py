@@ -490,6 +490,63 @@ def test_update_can_disable_rule(client, mint_token, monkeypatch):
     assert resp.json()["pattern"] == "x"  # untouched field preserved
 
 
+def test_update_non_creator_member_403_admin_and_creator_ok(client, mint_token, monkeypatch):
+    """vuln-0009 follow-up (4e5a32c4, pinned): a plain member who did not
+    create the rule must not be able to PATCH it — but owner/admin, or the
+    rule's own creator (even without owner/admin role), still can."""
+    store = _FakeStore(
+        profiles=[
+            {"id": "u1", "email": "owner@acme.dev", "role": "user"},
+            {"id": "u2", "email": "creator@acme.dev", "role": "user"},
+            {"id": "u3", "email": "other-member@acme.dev", "role": "user"},
+        ],
+        memberships=[
+            {"user_id": "u1", "org_id": "org-acme", "role": "owner"},
+            {"user_id": "u2", "org_id": "org-acme", "role": "member"},
+            {"user_id": "u3", "org_id": "org-acme", "role": "member"},
+        ],
+    )
+    monkeypatch.setattr(_V, "get_data_store", lambda: store)
+
+    _creator_raw, creator_headers = mint_token("creator@acme.dev")
+    resp = client.post(
+        "/api/v1/orgs/org-acme/red-flag-rules",
+        headers=creator_headers,
+        json={"name": "x", "match_type": "contains", "pattern": "x", "severity": "high"},
+    )
+    assert resp.status_code == 201, resp.text
+    rule_id = resp.json()["id"]
+    assert resp.json()["created_by"] == "creator@acme.dev"
+
+    # Non-creator, non-admin member: 403.
+    _other_raw, other_headers = mint_token("other-member@acme.dev")
+    resp = client.patch(
+        f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}",
+        headers=other_headers,
+        json={"enabled": False},
+    )
+    assert resp.status_code == 403, resp.text
+
+    # Owner/admin, not the creator: allowed.
+    owner_raw, owner_headers = mint_token("owner@acme.dev")
+    resp = client.patch(
+        f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}",
+        headers=owner_headers,
+        json={"enabled": False},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["enabled"] is False
+
+    # The creator, not owner/admin: allowed.
+    resp = client.patch(
+        f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}",
+        headers=creator_headers,
+        json={"enabled": True},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["enabled"] is True
+
+
 @pytest.mark.parametrize("field", ["name", "enabled", "match_type", "pattern", "severity"])
 def test_update_rejects_explicit_null_on_required_field(client, mint_token, monkeypatch, field):
     """PATCH {"<field>": null} on a NOT NULL column must 400, not 500 — an

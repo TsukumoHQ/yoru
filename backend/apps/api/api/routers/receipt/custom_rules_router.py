@@ -7,12 +7,21 @@ Org-wall pattern matches M5 (``export_router.export_org_audit``): the path
 403 — an invisible tenant must be indistinguishable from a nonexistent one),
 the studio super-admin may target any org via ``X-Organization-Id``.
 
-DELETE is owner/admin-gated (vuln-0009, strix pilot bb1f35fc): a plain
-member could delete another member's — including the owner's — rule. Uses
-the existing ``full_org_ids`` (owner/admin org subset) already computed by
-``visible_scope_sync`` for the read-scoping wall, via ``_wall_admin`` below.
-create_rule/update_rule remain membership-scoped only (unchanged; flagged as
-a follow-up in the PR, not fixed here — narrower change, matches the AC).
+DELETE is owner/admin-only (vuln-0009, strix pilot bb1f35fc, via
+``_wall_admin``) — deliberately stricter than PATCH; deleting a rule is
+more destructive than disabling one, and this ticket's ruling (4e5a32c4,
+cto 23:45Z 2026-09-25) does not reopen it.
+
+PATCH is owner/admin OR the rule's creator (4e5a32c4, strix vuln-0009
+follow-up): a plain member could otherwise disable/rewrite ANY rule in
+their org, including the owner's, via ``update_rule``'s old membership-
+only wall. ``_require_admin_or_creator`` below extends the same
+``full_org_ids`` primitive (DEC-yoru-rbac-ruling-1) with a
+``row.created_by == current_user`` escape hatch.
+
+POST (create) stays member-allowed by design (any member may propose a
+rule) and always persists ``created_by`` — already true before this
+ticket, unchanged.
 """
 from __future__ import annotations
 
@@ -49,6 +58,23 @@ def _wall_admin(current_user: str, org_id: str, x_organization_id: str | None) -
         raise HTTPException(status_code=404, detail="organization not found")
     if orgs is not None and org_id not in full:
         raise HTTPException(status_code=403, detail="owner or admin role required")
+
+
+def _require_admin_or_creator(
+    current_user: str, org_id: str, x_organization_id: str | None, row: CustomRule
+) -> None:
+    """Requires owner/admin role in ``org_id`` OR that ``current_user`` is
+    the rule's creator (4e5a32c4 ruling: mutation rights on a rule = org
+    owner/admin OR the rule's creator). Callers run ``_wall`` first for the
+    tenancy (org-visibility) 404 — this only 403s on a visible org the
+    caller neither administers nor created the rule in.
+    """
+    from apps.api.api.services.access.visibility import visible_scope_sync
+    _visible, orgs, full = visible_scope_sync(current_user, x_organization_id)
+    if orgs is not None and org_id not in full and row.created_by != current_user:
+        raise HTTPException(
+            status_code=403, detail="owner/admin role or rule creator required"
+        )
 
 
 # CustomRule columns that are NOT NULL. CustomRuleUpdate declares every field
@@ -138,6 +164,7 @@ class CustomRulesRouter:
         row = db.get(CustomRule, rule_id)
         if row is None or row.org_id != org_id:
             raise HTTPException(status_code=404, detail="rule not found")
+        _require_admin_or_creator(current_user, org_id, x_organization_id, row)
         updates = body.model_dump(exclude_unset=True)
         null_required = [
             f for f in _NOT_NULLABLE_UPDATE_FIELDS if f in updates and updates[f] is None
