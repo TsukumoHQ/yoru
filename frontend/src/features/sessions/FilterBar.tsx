@@ -12,6 +12,8 @@ function updateParam(
   const next = new URLSearchParams(params)
   if (value === null || value === "") next.delete(key)
   else next.set(key, value)
+  // Any filter change restarts pagination from the first page.
+  next.delete("page")
   return next
 }
 

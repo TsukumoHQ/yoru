@@ -1,5 +1,6 @@
-import { useMemo } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useMemo } from "react"
+import { useSearchParams } from "react-router-dom"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { listOrganizations, listSessions, listWorkspaces, type Workspace } from "../lib/api"
 import { useSelectedOrgId } from "../lib/org-scope"
 import { useSession } from "../auth/useSession"
@@ -8,12 +9,16 @@ import { FilterBar } from "../features/sessions/FilterBar"
 import { FleetStats } from "../features/sessions/FleetStats"
 import { NoExceptionsState } from "../features/sessions/NoExceptionsState"
 import { useFilters } from "../features/sessions/filters"
+import { PAGE_SIZE, pageCount, parsePage } from "../features/sessions/pagination"
+import { SessionsPagination } from "../features/sessions/SessionsPagination"
 import { SessionsTable } from "../features/sessions/SessionsTable"
 import { Skeleton } from "../components/ui/Skeleton"
 import type { SessionList } from "../types/receipt"
 
 export function SessionsListPage() {
   const filters = useFilters()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const page = parsePage(searchParams)
   const orgId = useSelectedOrgId()
   const { user } = useSession()
   const config = useInstanceConfig()
@@ -42,8 +47,27 @@ export function SessionsListPage() {
   // orgId is part of the key so a super-admin org switch refetches; the id is
   // forwarded as X-Organization-Id inside listSessions (lib/api orgHeaders).
   const query = useQuery<SessionList>({
-    queryKey: ["sessions", filters, orgId],
-    queryFn: () => listSessions(filters),
+    queryKey: ["sessions", filters, orgId, page],
+    queryFn: () => listSessions({ ...filters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    placeholderData: keepPreviousData,
+  })
+
+  const pages = pageCount(query.data?.total ?? 0)
+  const goToPage = (next: number) =>
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev)
+        if (next > 1) p.set("page", String(next))
+        else p.delete("page")
+        return p
+      },
+      { replace: true },
+    )
+
+  // A shrunk result set (or a stale ?page=) must not strand the user on an
+  // empty page past the end.
+  useEffect(() => {
+    if (query.data && !query.isPlaceholderData && page > pages) goToPage(pages)
   })
 
   const workspacesQuery = useQuery<Workspace[]>({
@@ -88,6 +112,10 @@ export function SessionsListPage() {
           workspaceNameById={workspaceNameById}
           orgLabelById={orgLabelById}
         />
+      )}
+
+      {query.data && query.data.total > PAGE_SIZE && (
+        <SessionsPagination page={page} pageCount={pages} total={query.data.total} onPage={goToPage} />
       )}
     </div>
   )
