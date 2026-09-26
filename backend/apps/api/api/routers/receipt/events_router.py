@@ -520,6 +520,15 @@ class EventsRouter:
             sess = touched.get(e.session_id)
             if sess is None:
                 sess = session.get(SessionRow, e.session_id)
+                if sess is not None and sess.user != effective_user:
+                    # An existing session is only appendable by its owner: the
+                    # session id is client-supplied, so without this any
+                    # authenticated identity could inject events into (and
+                    # mutate the aggregates/flags of) another tenant's session.
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="session belongs to another identity",
+                    )
                 if sess is None:
                     sess = SessionRow(
                         id=e.session_id,
