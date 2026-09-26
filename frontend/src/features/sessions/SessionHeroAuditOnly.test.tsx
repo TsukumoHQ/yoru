@@ -4,6 +4,7 @@ import { SessionHeroView, type SessionDetail } from "@receipt/ui"
 
 const BASE: SessionDetail = {
   id: "sess_1",
+  agent: "claude-code",
   user_email: "alice@acme.com",
   started_at: "2026-08-21T00:00:00Z",
   ended_at: "2026-08-21T00:05:00Z",

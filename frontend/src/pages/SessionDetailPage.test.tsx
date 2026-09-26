@@ -36,6 +36,7 @@ function event(id: string): SessionEvent {
 function sessionFixture(): SessionDetail {
   return {
     id: "sess_1",
+    agent: "claude-code",
     user_email: "alice@acme.dev",
     started_at: "2026-08-20T10:00:00Z",
     ended_at: "2026-08-20T10:05:00Z",
