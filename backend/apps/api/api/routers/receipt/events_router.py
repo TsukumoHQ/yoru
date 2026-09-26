@@ -528,6 +528,7 @@ class EventsRouter:
                         # legacy/anon tokens (no org) fall back to the default
                         # org. Frozen at session creation like workspace_id.
                         org_id=current_org or DEFAULT_ORG_ID,
+                        agent=e.agent or "claude-code",
                         started_at=ts,
                     )
                     session.add(sess)
