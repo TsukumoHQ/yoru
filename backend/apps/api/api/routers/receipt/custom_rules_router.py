@@ -33,7 +33,7 @@ from sqlmodel import select
 
 from .custom_rules import InvalidRule, invalidate_org_cache, validate_rule
 from .db import get_session
-from .deps import require_current_user
+from .deps import deny_non_dashboard_auth, require_current_user
 from .models import CustomRule, CustomRuleIn, CustomRuleOut, CustomRuleUpdate
 
 
@@ -99,11 +99,18 @@ class CustomRulesRouter:
     def __init__(self) -> None:
         self.router = APIRouter(tags=["receipt:custom-rules"])
         self.router.get("/orgs/{org_id}/red-flag-rules")(self.list_rules)
-        self.router.post("/orgs/{org_id}/red-flag-rules", status_code=201)(self.create_rule)
-        self.router.patch("/orgs/{org_id}/red-flag-rules/{rule_id}")(self.update_rule)
+        self.router.post(
+            "/orgs/{org_id}/red-flag-rules", status_code=201,
+            dependencies=[Depends(deny_non_dashboard_auth)],
+        )(self.create_rule)
+        self.router.patch(
+            "/orgs/{org_id}/red-flag-rules/{rule_id}",
+            dependencies=[Depends(deny_non_dashboard_auth)],
+        )(self.update_rule)
         self.router.delete(
             "/orgs/{org_id}/red-flag-rules/{rule_id}",
             status_code=204, response_model=None,
+            dependencies=[Depends(deny_non_dashboard_auth)],
         )(self.delete_rule)
 
     def get_router(self) -> APIRouter:

@@ -329,6 +329,21 @@ Rules of the road:
   `DELETE /api/v1/auth/api-key/{id}` revokes without replacement. Optional
   `expires_at` at creation gives keys a hard end-of-life.
 
+### Service tokens (org fleet)
+
+`POST /api/v1/auth/service-token` (dashboard session, org admin) mints a
+`rcpt_s_*` token for CI or fleet servers. A service token is a principal, not a
+person: its identity is `service:<org_id>`, and it carries an explicit scope set.
+
+- **Scopes**: `events:write` (default) allows `POST /sessions/events`;
+  `events:read` allows `GET` reads. Any other route returns 403.
+- **Never an admin.** Service tokens, hook tokens and API keys cannot create,
+  edit or delete red-flag rules; those calls need a dashboard session.
+- **Breaking (0.4.1):** the `user_email` field is removed and now returns 422.
+  Existing service tokens minted with `user_email` keep working for ingest but
+  attribute events to `service:<org_id>`. For per-developer attribution, have each
+  developer pair their own CLI (`yoru init`); that mints a token bound to them.
+
 ---
 
 ## Verification checklist

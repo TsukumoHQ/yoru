@@ -336,6 +336,21 @@ class _FakeStore:
 
 
 @pytest.fixture()
+def mint_dashboard(session_cookie_for):
+    """Factory: mint_dashboard('a@b') -> (None, {'Cookie': <dashboard session>}).
+
+    Rule mutations require the dashboard JWT (f71a86b2): hook/service tokens
+    get 403, so the CRUD tests authenticate the way the dashboard does. Same
+    (raw, headers) shape as ``mint_token`` so call sites read the same."""
+    from apps.api.api.dependencies.auth import SESSION_COOKIE_NAME
+
+    def _mint(email: str):
+        return None, {"Cookie": f"{SESSION_COOKIE_NAME}={session_cookie_for(email)}"}
+
+    return _mint
+
+
+@pytest.fixture()
 def app(engine) -> FastAPI:
     """Mounts both EventsRouter (drives the E2E ingest tests above) and
     CustomRulesRouter (drives the CRUD tests below) — this module exercises
@@ -361,12 +376,12 @@ def test_crud_requires_auth(client):
     assert client.get("/api/v1/orgs/org-acme/red-flag-rules").status_code == 401
 
 
-def test_member_creates_and_lists_own_org_rule(client, mint_token, monkeypatch):
+def test_member_creates_and_lists_own_org_rule(client, mint_dashboard, monkeypatch):
     monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
         profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
         memberships=[{"user_id": "u2", "org_id": "org-acme"}],
     ))
-    _raw, headers = mint_token("dev@acme.dev")
+    _raw, headers = mint_dashboard("dev@acme.dev")
 
     resp = client.post(
         "/api/v1/orgs/org-acme/red-flag-rules",
@@ -383,7 +398,7 @@ def test_member_creates_and_lists_own_org_rule(client, mint_token, monkeypatch):
     assert [r["id"] for r in resp.json()] == [rule_id]
 
 
-def test_member_delete_is_403_owner_admin_deletes(client, mint_token, monkeypatch):
+def test_member_delete_is_403_owner_admin_deletes(client, mint_dashboard, monkeypatch):
     """vuln-0009 (strix pilot bb1f35fc, pinned): a plain member must not be
     able to delete another member's — or the owner's — red-flag rule. Only
     owner/admin role in that org may delete it."""
@@ -399,7 +414,7 @@ def test_member_delete_is_403_owner_admin_deletes(client, mint_token, monkeypatc
     )
     monkeypatch.setattr(_V, "get_data_store", lambda: store)
 
-    owner_raw, owner_headers = mint_token("owner@acme.dev")
+    owner_raw, owner_headers = mint_dashboard("owner@acme.dev")
     resp = client.post(
         "/api/v1/orgs/org-acme/red-flag-rules",
         headers=owner_headers,
@@ -409,7 +424,7 @@ def test_member_delete_is_403_owner_admin_deletes(client, mint_token, monkeypatc
     assert resp.status_code == 201, resp.text
     rule_id = resp.json()["id"]
 
-    _member_raw, member_headers = mint_token("dev@acme.dev")
+    _member_raw, member_headers = mint_dashboard("dev@acme.dev")
     resp = client.delete(
         f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}", headers=member_headers
     )
@@ -425,12 +440,12 @@ def test_member_delete_is_403_owner_admin_deletes(client, mint_token, monkeypatc
     assert resp.json() == []
 
 
-def test_member_cross_org_is_404(client, mint_token, monkeypatch):
+def test_member_cross_org_is_404(client, mint_dashboard, monkeypatch):
     monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
         profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
         memberships=[{"user_id": "u2", "org_id": "org-acme"}],
     ))
-    _raw, headers = mint_token("dev@acme.dev")
+    _raw, headers = mint_dashboard("dev@acme.dev")
     resp = client.get("/api/v1/orgs/org-forbidden/red-flag-rules", headers=headers)
     assert resp.status_code == 404
     resp = client.post(
@@ -441,11 +456,11 @@ def test_member_cross_org_is_404(client, mint_token, monkeypatch):
     assert resp.status_code == 404
 
 
-def test_super_admin_manages_any_org(client, mint_token, monkeypatch):
+def test_super_admin_manages_any_org(client, mint_dashboard, monkeypatch):
     monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
         profiles=[{"id": "u1", "email": "boss@studio.dev", "role": "admin"}],
     ))
-    _raw, headers = mint_token("boss@studio.dev")
+    _raw, headers = mint_dashboard("boss@studio.dev")
     resp = client.post(
         "/api/v1/orgs/org-acme/red-flag-rules",
         headers=headers,
@@ -454,12 +469,12 @@ def test_super_admin_manages_any_org(client, mint_token, monkeypatch):
     assert resp.status_code == 201, resp.text
 
 
-def test_create_rejects_regex_at_router_level(client, mint_token, monkeypatch):
+def test_create_rejects_regex_at_router_level(client, mint_dashboard, monkeypatch):
     monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
         profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
         memberships=[{"user_id": "u2", "org_id": "org-acme"}],
     ))
-    _raw, headers = mint_token("dev@acme.dev")
+    _raw, headers = mint_dashboard("dev@acme.dev")
     resp = client.post(
         "/api/v1/orgs/org-acme/red-flag-rules",
         headers=headers,
@@ -468,12 +483,12 @@ def test_create_rejects_regex_at_router_level(client, mint_token, monkeypatch):
     assert resp.status_code == 400
 
 
-def test_update_can_disable_rule(client, mint_token, monkeypatch):
+def test_update_can_disable_rule(client, mint_dashboard, monkeypatch):
     monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
         profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
         memberships=[{"user_id": "u2", "org_id": "org-acme"}],
     ))
-    _raw, headers = mint_token("dev@acme.dev")
+    _raw, headers = mint_dashboard("dev@acme.dev")
     resp = client.post(
         "/api/v1/orgs/org-acme/red-flag-rules",
         headers=headers,
@@ -490,7 +505,7 @@ def test_update_can_disable_rule(client, mint_token, monkeypatch):
     assert resp.json()["pattern"] == "x"  # untouched field preserved
 
 
-def test_update_non_creator_member_403_admin_and_creator_ok(client, mint_token, monkeypatch):
+def test_update_non_creator_member_403_admin_and_creator_ok(client, mint_dashboard, monkeypatch):
     """vuln-0009 follow-up (4e5a32c4, pinned): a plain member who did not
     create the rule must not be able to PATCH it — but owner/admin, or the
     rule's own creator (even without owner/admin role), still can."""
@@ -508,7 +523,7 @@ def test_update_non_creator_member_403_admin_and_creator_ok(client, mint_token, 
     )
     monkeypatch.setattr(_V, "get_data_store", lambda: store)
 
-    _creator_raw, creator_headers = mint_token("creator@acme.dev")
+    _creator_raw, creator_headers = mint_dashboard("creator@acme.dev")
     resp = client.post(
         "/api/v1/orgs/org-acme/red-flag-rules",
         headers=creator_headers,
@@ -519,7 +534,7 @@ def test_update_non_creator_member_403_admin_and_creator_ok(client, mint_token, 
     assert resp.json()["created_by"] == "creator@acme.dev"
 
     # Non-creator, non-admin member: 403.
-    _other_raw, other_headers = mint_token("other-member@acme.dev")
+    _other_raw, other_headers = mint_dashboard("other-member@acme.dev")
     resp = client.patch(
         f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}",
         headers=other_headers,
@@ -528,7 +543,7 @@ def test_update_non_creator_member_403_admin_and_creator_ok(client, mint_token, 
     assert resp.status_code == 403, resp.text
 
     # Owner/admin, not the creator: allowed.
-    owner_raw, owner_headers = mint_token("owner@acme.dev")
+    owner_raw, owner_headers = mint_dashboard("owner@acme.dev")
     resp = client.patch(
         f"/api/v1/orgs/org-acme/red-flag-rules/{rule_id}",
         headers=owner_headers,
@@ -548,7 +563,7 @@ def test_update_non_creator_member_403_admin_and_creator_ok(client, mint_token, 
 
 
 @pytest.mark.parametrize("field", ["name", "enabled", "match_type", "pattern", "severity"])
-def test_update_rejects_explicit_null_on_required_field(client, mint_token, monkeypatch, field):
+def test_update_rejects_explicit_null_on_required_field(client, mint_dashboard, monkeypatch, field):
     """PATCH {"<field>": null} on a NOT NULL column must 400, not 500 — an
     explicit null survives model_dump(exclude_unset=True) same as any other
     sent value, so setattr(row, field, None) would otherwise hit sqlite's
@@ -557,7 +572,7 @@ def test_update_rejects_explicit_null_on_required_field(client, mint_token, monk
         profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
         memberships=[{"user_id": "u2", "org_id": "org-acme"}],
     ))
-    _raw, headers = mint_token("dev@acme.dev")
+    _raw, headers = mint_dashboard("dev@acme.dev")
     resp = client.post(
         "/api/v1/orgs/org-acme/red-flag-rules",
         headers=headers,
@@ -575,14 +590,14 @@ def test_update_rejects_explicit_null_on_required_field(client, mint_token, monk
     assert resp.json()[0]["name"] == "x"
 
 
-def test_update_allows_explicit_null_on_optional_filters(client, mint_token, monkeypatch):
+def test_update_allows_explicit_null_on_optional_filters(client, mint_dashboard, monkeypatch):
     """kind_filter/tool_filter ARE nullable columns — explicit null is the
     documented way to clear a previously-set filter, must stay 200."""
     monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
         profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
         memberships=[{"user_id": "u2", "org_id": "org-acme"}],
     ))
-    _raw, headers = mint_token("dev@acme.dev")
+    _raw, headers = mint_dashboard("dev@acme.dev")
     resp = client.post(
         "/api/v1/orgs/org-acme/red-flag-rules",
         headers=headers,
@@ -600,12 +615,12 @@ def test_update_allows_explicit_null_on_optional_filters(client, mint_token, mon
     assert resp.json()["tool_filter"] is None
 
 
-def test_update_unknown_rule_is_404(client, mint_token, monkeypatch):
+def test_update_unknown_rule_is_404(client, mint_dashboard, monkeypatch):
     monkeypatch.setattr(_V, "get_data_store", lambda: _FakeStore(
         profiles=[{"id": "u2", "email": "dev@acme.dev", "role": "user"}],
         memberships=[{"user_id": "u2", "org_id": "org-acme"}],
     ))
-    _raw, headers = mint_token("dev@acme.dev")
+    _raw, headers = mint_dashboard("dev@acme.dev")
     resp = client.patch(
         "/api/v1/orgs/org-acme/red-flag-rules/does-not-exist",
         headers=headers,

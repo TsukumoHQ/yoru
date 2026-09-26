@@ -41,6 +41,7 @@ from .deps import _naive_utc_now, deny_api_key_auth, require_current_user
 from .email.welcome import send_welcome_email
 from .models import (
     API_KEY_SCOPES,
+    SERVICE_TOKEN_SCOPES,
     ApiKey,
     ApiKeyCreateIn,
     ApiKeyCreateOut,
@@ -995,16 +996,24 @@ class AuthRouter:
         caller_email = self._require_org_admin(request, body.org_id)
         workspace_id = self._org_default_workspace_id(body.org_id)
 
+        scopes = body.scopes or ["events:write"]
+        bad = set(scopes) - SERVICE_TOKEN_SCOPES
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail=f"scopes must be a subset of {sorted(SERVICE_TOKEN_SCOPES)}",
+            )
+
         raw = _SERVICE_TOKEN_PREFIX + secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-        scopes_json = json.dumps(body.scopes or ["events:write"])
+        scopes_json = json.dumps(scopes)
         now = _naive_utc_now()
         # M4: bind the TENANT org_id so ingest via this token stamps
-        # sessions.org_id = this org (M2a). Optionally attribute to a specific
-        # dev (per-dev provisioning); otherwise a synthetic org-fleet identity.
+        # sessions.org_id = this org (M2a). The principal is always the
+        # synthetic `service:<org_id>`, never a user (f71a86b2).
         row = CliToken(
             id=uuid.uuid4().hex,
-            user=body.user_email or f"service:{body.org_id}",
+            user=f"service:{body.org_id}",
             token_hash=token_hash,
             token_type="service",
             org_id=body.org_id,

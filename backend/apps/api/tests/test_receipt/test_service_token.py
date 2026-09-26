@@ -83,12 +83,13 @@ def test_list_scoped_to_org(client: TestClient, session_cookie_for) -> None:
     assert rows[0]["org_id"] == "org-a"
 
 
-def test_m4_token_binds_tenant_org_and_optional_dev(
+def test_m4_token_binds_tenant_org_and_service_principal(
     client: TestClient, session_cookie_for, engine
 ) -> None:
     """M4 (design 44a3774a §4): a minted org-scoped token carries the TENANT
-    org_id (so ingest stamps sessions.org_id — M2a), and an optional user_email
-    binds per-dev attribution instead of the synthetic service identity."""
+    org_id (so ingest stamps sessions.org_id — M2a) and the synthetic
+    `service:<org_id>` principal. Per-dev attribution via `user_email` is
+    retired (f71a86b2): a dev pairs their own CLI for a user token instead."""
     from sqlmodel import Session as DBSession
     from sqlmodel import select
 
@@ -96,20 +97,6 @@ def test_m4_token_binds_tenant_org_and_optional_dev(
 
     _login(client, session_cookie_for)
 
-    # per-dev org-scoped token
-    r = client.post(
-        "/api/v1/auth/service-token",
-        json={"org_id": _ORG, "label": "dev-alice", "user_email": "alice@acme.dev"},
-    )
-    assert r.status_code == 201, r.text
-    with DBSession(engine) as s:
-        row = s.exec(
-            select(CliToken).where(CliToken.label == "dev-alice")
-        ).first()
-    assert row.org_id == _ORG                 # tenant bound → ingest stamps it
-    assert row.user == "alice@acme.dev"       # per-dev attribution
-
-    # shared org token (no user_email) → org bound, synthetic identity
     r = client.post(
         "/api/v1/auth/service-token",
         json={"org_id": _ORG, "label": "fleet"},
@@ -117,5 +104,5 @@ def test_m4_token_binds_tenant_org_and_optional_dev(
     assert r.status_code == 201, r.text
     with DBSession(engine) as s:
         row = s.exec(select(CliToken).where(CliToken.label == "fleet")).first()
-    assert row.org_id == _ORG
-    assert row.user == f"service:{_ORG}"
+    assert row.org_id == _ORG                 # tenant bound → ingest stamps it
+    assert row.user == f"service:{_ORG}"      # principal, never a user

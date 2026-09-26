@@ -5,6 +5,19 @@ The CLI (`yoru-cli`, MIT) is versioned and released separately.
 
 This project follows semantic versioning.
 
+## [Unreleased]
+
+### Changed
+
+- BREAKING: service tokens are principals, not users. `POST /auth/service-token`
+  no longer accepts `user_email` (422); the token identity is always
+  `service:<org_id>`, and existing tokens minted with a `user_email` now resolve to
+  that principal too. Scopes are enforced: `events:write` for ingest, `events:read`
+  for reads, 403 elsewhere. For per-developer attribution, pair each developer's
+  own CLI. (task:f71a86b2)
+- Red-flag rule create, update and delete require a dashboard session; hook
+  tokens, service tokens and API keys get 403. (task:f71a86b2)
+
 ## [0.4.1] - 2026-09-26
 
 Security patch for 0.4.0, from a pre-GA penetration-test pass. No API shape

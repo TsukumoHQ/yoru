@@ -759,16 +759,19 @@ class DeviceCodeApproveIn(SQLModel):
 
 # ---------- Service tokens (Phase B) ----------
 
+# Scope vocabulary for service tokens. A service token is a principal
+# (`service:<org_id>`), never a user: it may ingest events and read, nothing else.
+SERVICE_TOKEN_SCOPES: frozenset[str] = frozenset({"events:write", "events:read"})
+
+
 class ServiceTokenCreateIn(SQLModel):
+    # extra="forbid": the retired `user_email` field (f71a86b2) must 422, not be
+    # silently dropped, so a caller relying on per-dev attribution finds out.
+    model_config = {"extra": "forbid"}
+
     org_id: str = Field(min_length=1)
     label: str = Field(min_length=1, max_length=128)
     scopes: Optional[list[str]] = Field(default=None)
-    # M4 (multi-tenant provisioning, design 44a3774a §4). Optional per-dev
-    # attribution: when set, the minted token is bound to this dev's email so
-    # their ingested events are attributed to them (not a synthetic service
-    # identity). The token always carries org_id, so a dev can only write into
-    # this org. Omit for a shared org/fleet token.
-    user_email: Optional[str] = Field(default=None, max_length=320)
 
 
 class ServiceTokenCreateOut(SQLModel):

@@ -43,8 +43,21 @@ def _naive_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _resolve_token(authorization: str, session: DBSession) -> str:
-    """Parse 'Bearer rcpt_...' and return the bound user or raise 401.
+def _required_service_scope(request: Request) -> str | None:
+    """Scope a service token must carry for this request, or None when no
+    scope grants the action (service tokens ingest and read; nothing else)."""
+    return {"ingest": "events:write", "read": "events:read"}.get(
+        _required_api_key_scope(request) or ""
+    )
+
+
+def _resolve_token(authorization: str, session: DBSession, request: Request) -> str:
+    """Parse 'Bearer rcpt_...' and return the bound principal or raise 401.
+
+    A user hook token returns its bound user. A service token returns the
+    principal `service:<org_id>` — never `row.user`, so a legacy row minted with
+    a `user_email` cannot act as that user — and 403s a route its scopes do not
+    cover (f71a86b2).
 
     Side-effect: updates `last_used_at` (naive UTC) on the matched row so
     `GET /auth/hook-tokens` can show a freshness indicator.
@@ -73,10 +86,26 @@ def _resolve_token(authorization: str, session: DBSession) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or revoked token",
         )
+    if row.token_type == "service":
+        request.state.auth_method = "service_token"
+        required = _required_service_scope(request)
+        try:
+            granted = set(json.loads(row.scopes)) if row.scopes else {"events:write"}
+        except ValueError:
+            granted = set()
+        if required is None or required not in granted:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="service token lacks the scope for this action",
+            )
+        principal = f"service:{row.org_id or row.workspace_id}"
+    else:
+        request.state.auth_method = "hook_token"
+        principal = row.user
     row.last_used_at = _naive_utc_now()
     session.add(row)
     session.commit()
-    return row.user
+    return principal
 
 
 def _required_api_key_scope(request: Request) -> str | None:
@@ -216,7 +245,7 @@ def get_current_user(
       4. None (v0 backward-compat for ingest fallback to `EventIn.user`)
     """
     if authorization is not None:
-        return _resolve_token(authorization, session)
+        return _resolve_token(authorization, session, request)
     if x_api_key is not None:
         return _resolve_api_key(x_api_key, request, session)
     return _resolve_from_cookie(request)
@@ -292,7 +321,7 @@ def require_current_user(
     """Strict auth — 401 unless bearer header, API key, or session cookie
     resolves."""
     if authorization is not None:
-        return _resolve_token(authorization, session)
+        return _resolve_token(authorization, session, request)
     if x_api_key is not None:
         return _resolve_api_key(x_api_key, request, session)
     user = _resolve_from_cookie(request)
@@ -302,3 +331,18 @@ def require_current_user(
             detail="authorization required",
         )
     return user
+
+
+def deny_non_dashboard_auth(
+    request: Request, _user: str = Depends(require_current_user)
+) -> None:
+    """Guard for admin mutations: only a dashboard session (cookie) may act.
+    Hook tokens, service tokens and API keys carry an identity or a scope,
+    never a role, so they must not reach an admin wall (f71a86b2). Depends on
+    `require_current_user` so `request.state.auth_method` is set before the
+    check (route-level dependencies run before parameter dependencies)."""
+    if getattr(request.state, "auth_method", None) in ("hook_token", "service_token", "api_key"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="this action requires a dashboard session",
+        )
