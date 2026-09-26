@@ -213,6 +213,11 @@ async def list_bitbucket_repos(
         mapped_rows = getattr(mapped_resp, "data", None) or []
     except Exception:
         pass
+    # Only the caller's own workspaces: the query above is not owner-scoped, so
+    # without this every user's repo mappings (and workspace ids) leak.
+    from .workspaces_endpoints import owned_workspace_ids
+    owned = owned_workspace_ids(sb, user_id)
+    mapped_rows = [m for m in mapped_rows if str(m.get("workspace_id")) in owned]
     mapped_by_key = {
         f"{m['owner']}/{m['repo']}": m["workspace_id"]
         for m in mapped_rows
@@ -248,13 +253,9 @@ async def auto_route_repos(
     """
     sb = _sb(user_token)
 
-    # Sanity: workspace must be visible via RLS.
-    ws_rows = sb.query_records(
-        "workspaces",
-        filters={"id": body.workspace_id},
-    )
-    if not ws_rows:
-        raise HTTPException(status_code=404, detail="workspace not found or not yours")
+    # Sanity: the caller must own the workspace (the local store has no RLS).
+    from .workspaces_endpoints import require_workspace
+    await require_workspace(user_token, user_id, body.workspace_id, write=True)
 
     added = 0
     already_mapped = 0

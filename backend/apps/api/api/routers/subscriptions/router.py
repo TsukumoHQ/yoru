@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from libs.log_manager.controller import LoggingController
 from apps.api.api.dependencies.auth import get_correlation_id, get_current_user_token, require_auth
+from apps.api.api.exceptions.domain_exceptions import (
+    NotFoundError,
+    PermissionError,
+    ValidationError,
+)
 from apps.api.api.models.subscription.subscription_models import (
     SubscriptionCreate,
     SubscriptionResponse,
@@ -71,6 +76,13 @@ class SubscriptionsRouter:
     ):
         """Cancel a subscription."""
         service = SubscriptionService(access_token=token)
-        return await service.cancel_subscription(
-            subscription_id, correlation_id
-        )
+        try:
+            return await service.cancel_subscription(
+                subscription_id, user_id, correlation_id
+            )
+        except NotFoundError as e:
+            raise HTTPException(status_code=404, detail=e.message) from e
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=e.message) from e
+        except ValidationError as e:
+            raise HTTPException(status_code=400, detail=e.message) from e

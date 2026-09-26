@@ -439,9 +439,10 @@ class MeRouter:
         self,
         request: Request,
         workspace_id: str,
+        user_id: UUID = Depends(get_current_user_id),  # noqa: B008
         token: str = Depends(get_current_user_token),
     ) -> list[WorkspaceRepoOut]:
-        return await list_workspace_repos(token, workspace_id)
+        return await list_workspace_repos(token, user_id, workspace_id)
 
     async def add_my_workspace_repo(
         self,
@@ -458,9 +459,10 @@ class MeRouter:
         request: Request,
         workspace_id: str,
         repo_id: str,
+        user_id: UUID = Depends(get_current_user_id),  # noqa: B008
         token: str = Depends(get_current_user_token),
     ) -> None:
-        return await remove_workspace_repo(token, workspace_id, repo_id)
+        return await remove_workspace_repo(token, user_id, workspace_id, repo_id)
 
     async def promote_my_workspace(
         self,

@@ -82,6 +82,34 @@ def _sb(user_token: str) -> SupabaseManager:
     return get_data_store(access_token=user_token)
 
 
+async def require_workspace(
+    user_token: str, user_id: UUID, workspace_id: str, *, write: bool,
+) -> dict:
+    """Load a workspace the caller may act on, else 404 (a foreign id looks
+    exactly like a missing one). The local datastore has no RLS, so every
+    by-id workspace route must compare the row owner to the caller here.
+    Writes are owner-only (same as update/delete); reads follow the listing
+    scope (own + group-mates', admin sees all)."""
+    sb = _sb(user_token)
+    rows = sb.query_records("workspaces", filters={"id": workspace_id})
+    ws = rows[0] if rows else None
+    if ws is not None and not ws.get("deleted_at"):
+        owner = str(ws.get("owner_user_id"))
+        if owner == str(user_id):
+            return ws
+        if not write:
+            from apps.api.api.services.access.visibility import visible_owner_ids
+            allowed = await visible_owner_ids(user_id)
+            if allowed is None or owner in allowed:
+                return ws
+    raise HTTPException(status_code=404, detail="workspace not found or not yours")
+
+
+def owned_workspace_ids(sb: SupabaseManager, user_id: UUID) -> set[str]:
+    rows = sb.query_records("workspaces", filters={"owner_user_id": str(user_id)}) or []
+    return {str(r["id"]) for r in rows if not r.get("deleted_at")}
+
+
 # ---------- Endpoints ----------
 
 async def list_workspaces(user_token: str, user_id: UUID) -> list[WorkspaceOut]:
@@ -211,7 +239,10 @@ async def delete_workspace(user_token: str, workspace_id: str, user_id: UUID) ->
 
 # ---------- Repo mapping ----------
 
-async def list_workspace_repos(user_token: str, workspace_id: str) -> list[WorkspaceRepoOut]:
+async def list_workspace_repos(
+    user_token: str, user_id: UUID, workspace_id: str,
+) -> list[WorkspaceRepoOut]:
+    await require_workspace(user_token, user_id, workspace_id, write=False)
     sb = _sb(user_token)
     try:
         rows = sb.query_records(
@@ -234,6 +265,7 @@ async def list_workspace_repos(user_token: str, workspace_id: str) -> list[Works
 async def add_workspace_repo(
     user_token: str, user_id: UUID, workspace_id: str, body: WorkspaceRepoIn,
 ) -> WorkspaceRepoOut:
+    await require_workspace(user_token, user_id, workspace_id, write=True)
     sb = _sb(user_token)
     payload = {
         "workspace_id": workspace_id,
@@ -264,8 +296,9 @@ async def add_workspace_repo(
 
 
 async def remove_workspace_repo(
-    user_token: str, workspace_id: str, repo_id: str,
+    user_token: str, user_id: UUID, workspace_id: str, repo_id: str,
 ) -> None:
+    await require_workspace(user_token, user_id, workspace_id, write=True)
     sb = _sb(user_token)
     try:
         resp = (

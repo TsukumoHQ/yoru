@@ -9,7 +9,11 @@ from uuid import UUID
 from libs.log_manager.controller import LoggingController
 from libs.supabase.supabase import SupabaseManager
 from libs.datastore import get_data_store
-from apps.api.api.exceptions.domain_exceptions import NotFoundError, ValidationError
+from apps.api.api.exceptions.domain_exceptions import (
+    NotFoundError,
+    PermissionError,
+    ValidationError,
+)
 from apps.api.api.models.subscription.subscription_models import (
     SubscriptionCreate,
     SubscriptionResponse,
@@ -209,9 +213,15 @@ class SubscriptionService:
             raise
 
     async def cancel_subscription(
-        self, subscription_id: UUID, correlation_id: str
+        self, subscription_id: UUID, user_id: UUID, correlation_id: str
     ) -> SubscriptionResponse:
-        """Cancel a subscription."""
+        """Cancel a subscription.
+
+        Any authenticated caller could otherwise cancel any other user's/org's
+        subscription by guessing a UUID — the local (self-hosted) datastore
+        has no RLS, so this must be enforced here rather than assumed from a
+        JWT-scoped Postgres policy.
+        """
         context = {
             "operation": "cancel_subscription",
             "component": "SubscriptionService",
@@ -227,6 +237,8 @@ class SubscriptionService:
             )
             if not subscription:
                 raise NotFoundError("Subscription not found", correlation_id)
+
+            self._require_subscription_access(subscription, user_id, correlation_id)
 
             if subscription["status"] != "active":
                 raise ValidationError("Subscription is not active", correlation_id)
@@ -245,6 +257,32 @@ class SubscriptionService:
             context["error"] = str(e)
             self.logger.log_error("Failed to cancel subscription", context)
             raise
+
+    def _require_subscription_access(
+        self, subscription: dict, user_id: UUID, correlation_id: str
+    ) -> None:
+        """The caller must be the subscription's own user, or (for org-billed
+        subscriptions) an owner/admin of that org. 404 on a foreign personal
+        subscription (existence must not leak); 403 on a visible org the
+        caller merely lacks a billing role in.
+        """
+        if subscription.get("user_id") and subscription["user_id"] == str(user_id):
+            return
+        org_id = subscription.get("org_id")
+        if org_id:
+            memberships = self.supabase.query_records(
+                "organization_members",
+                filters={"org_id": str(org_id), "user_id": str(user_id)},
+                correlation_id=correlation_id,
+            )
+            membership = memberships[0] if memberships else None
+            if membership and membership.get("role") in ("owner", "admin"):
+                return
+            raise PermissionError(
+                "Admin or owner role required to manage this subscription",
+                correlation_id,
+            )
+        raise NotFoundError("Subscription not found", correlation_id)
 
     async def update_subscription(
         self, subscription_id: UUID, data: SubscriptionUpdate, correlation_id: str

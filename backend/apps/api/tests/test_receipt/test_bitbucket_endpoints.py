@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from apps.api.api.routers.me import bitbucket_endpoints as bb
+from apps.api.api.routers.me import workspaces_endpoints as ws_mod
 
 
 # ── fakes ────────────────────────────────────────────────────────────────
@@ -88,7 +89,13 @@ class FakeStore:
         if table == "bitbucket_integrations":
             return list(self._integration_rows)
         if table == "workspaces":
-            return list(self._workspace_rows)
+            rows = self._workspace_rows
+            if filters:
+                rows = [
+                    r for r in rows
+                    if all(r.get(k) == v for k, v in filters.items())
+                ]
+            return list(rows)
         return []
 
 
@@ -96,6 +103,10 @@ class FakeStore:
 def patch_store(monkeypatch):
     def _install(store):
         monkeypatch.setattr(bb, "get_data_store", lambda **_k: store)
+        # require_workspace (workspaces_endpoints.py) opens its own client —
+        # route it at the same fake store so ownership checks see the same
+        # workspace rows instead of hitting the real (tableless) datastore.
+        monkeypatch.setattr(ws_mod, "get_data_store", lambda **_k: store)
         return store
     return _install
 
@@ -161,8 +172,10 @@ async def test_list_repos_requires_connection(patch_store):
 
 
 async def test_list_repos_maps_shape_and_workspace(patch_store, monkeypatch):
+    uid = uuid4()
     patch_store(FakeStore(
         integration_rows=[{"provider_token": "pt"}],
+        workspace_rows=[{"id": "wsX", "owner_user_id": str(uid)}],
         mapped_rows=[{"workspace_id": "wsX", "host": "bitbucket.org",
                       "owner": "acme", "repo": "app"}],
     ))
@@ -173,7 +186,7 @@ async def test_list_repos_maps_shape_and_workspace(patch_store, monkeypatch):
          "is_private": False, "updated_on": "2026-01-02T00:00:00Z"},
     ]}
     monkeypatch.setattr(bb.httpx, "get", lambda *a, **k: _FakeResp(200, payload))
-    repos = await bb.list_bitbucket_repos("tok", uuid4())
+    repos = await bb.list_bitbucket_repos("tok", uid)
     assert [r.repo for r in repos] == ["app", "web"]
     assert repos[0].host == "bitbucket.org"
     assert repos[0].owner == "acme"
@@ -192,9 +205,12 @@ async def test_list_repos_token_expired_is_401(patch_store, monkeypatch):
 
 # ── auto-route ───────────────────────────────────────────────────────────
 async def test_auto_route_writes_bitbucket_host(patch_store):
-    store = patch_store(FakeStore(workspace_rows=[{"id": "ws1"}]))
+    uid = uuid4()
+    store = patch_store(
+        FakeStore(workspace_rows=[{"id": "ws1", "owner_user_id": str(uid)}])
+    )
     out = await bb.auto_route_repos(
-        "tok", uuid4(),
+        "tok", uid,
         bb.AutoRouteIn(workspace_id="ws1", repos=["acme/app", "acme/web"]),
     )
     assert out == {"added": 2, "skipped_already_mapped": 0, "errors": 0}
@@ -204,10 +220,13 @@ async def test_auto_route_writes_bitbucket_host(patch_store):
 
 
 async def test_auto_route_dupes_are_skipped(patch_store):
-    store = patch_store(FakeStore(workspace_rows=[{"id": "ws1"}]))
+    uid = uuid4()
+    store = patch_store(
+        FakeStore(workspace_rows=[{"id": "ws1", "owner_user_id": str(uid)}])
+    )
     store.existing_repo_keys.add(("bitbucket.org", "acme", "app"))
     out = await bb.auto_route_repos(
-        "tok", uuid4(),
+        "tok", uid,
         bb.AutoRouteIn(workspace_id="ws1", repos=["acme/app", "acme/web"]),
     )
     assert out["added"] == 1
@@ -220,5 +239,20 @@ async def test_auto_route_unknown_workspace_is_404(patch_store):
         await bb.auto_route_repos(
             "tok", uuid4(),
             bb.AutoRouteIn(workspace_id="ghost", repos=["acme/app"]),
+        )
+    assert ei.value.status_code == 404
+
+
+async def test_auto_route_refuses_other_users_workspace(patch_store):
+    """cross-tenant IDOR pin: auto-route must not accept a workspace_id the
+    caller doesn't own, even if the row exists (belongs to someone else)."""
+    owner = uuid4()
+    patch_store(
+        FakeStore(workspace_rows=[{"id": "ws1", "owner_user_id": str(owner)}])
+    )
+    with pytest.raises(bb.HTTPException) as ei:
+        await bb.auto_route_repos(
+            "tok", uuid4(),
+            bb.AutoRouteIn(workspace_id="ws1", repos=["acme/app"]),
         )
     assert ei.value.status_code == 404
