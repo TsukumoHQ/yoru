@@ -11,7 +11,7 @@ MARKETING := marketing
 
 .PHONY: help install install-backend install-frontend dev dev-backend dev-frontend \
         dev-marketing build-marketing setup \
-        test test-backend test-frontend test-e2e smoke lint lint-backend lint-frontend build \
+        backend-venv test test-backend test-frontend test-e2e smoke lint lint-backend lint-frontend build \
         build-backend build-frontend clean down restart-backend
 
 help:
@@ -59,8 +59,16 @@ build-marketing:
 
 test: test-backend test-frontend
 
-test-backend:
-	cd $(BACKEND) && uv sync --extra dev -q && uv run pytest
+# Hermetic venv: a review worktree can carry a half-installed .venv (dist-info
+# present, module missing), which uv sync treats as up to date. Probe the
+# pytest plugins and reinstall when the probe fails.
+backend-venv:
+	cd $(BACKEND) && uv sync --frozen --extra dev -q
+	cd $(BACKEND) && uv run --frozen python -c "import pytest_asyncio" 2>/dev/null \
+		|| uv sync --frozen --extra dev --reinstall -q
+
+test-backend: backend-venv
+	cd $(BACKEND) && uv run --frozen pytest
 
 test-frontend:
 	@if [ -f $(FRONTEND)/package.json ] && grep -q '"test"' $(FRONTEND)/package.json; then \

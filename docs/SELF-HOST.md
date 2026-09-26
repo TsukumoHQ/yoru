@@ -98,6 +98,12 @@ AUTH_PROVIDER=local
 # secret at backend/data/.auth_jwt_secret on first boot. SET EXPLICITLY in prod.
 # AUTH_JWT_SECRET=
 
+# Key that encrypts outbound-webhook signing secrets at rest (Fernet). Leave unset
+# to auto-generate one at backend/data/.webhook_secret_key on first boot. SET
+# EXPLICITLY when backend/data is not persisted across deploys. Lose the key and
+# every stored webhook secret is unreadable.
+# WEBHOOK_SECRET_ENCRYPTION_KEY=
+
 # === Billing ===
 # OFF by default for self-host: ingest is unlimited, no Stripe/paywall surfaces.
 BILLING_ENABLED=false
@@ -370,7 +376,11 @@ docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 Schema changes are applied automatically at startup for both SQLite and
-Postgres. Skim the [release notes](https://github.com/TsukumoHQ/yoru/releases)
+Postgres. From 0.4.1, webhook secrets created by earlier versions (stored in
+plaintext) are encrypted in place: per-user subscriptions at startup, org/admin
+webhooks the first time they sign a delivery. No action needed, but see
+`WEBHOOK_SECRET_ENCRYPTION_KEY` under Security notes and back up
+`backend/data/` before upgrading. Skim the [release notes](https://github.com/TsukumoHQ/yoru/releases)
 first — breaking changes are tagged with a 🚨.
 
 To find out whether you're behind without pulling anything, the CLI can check a
@@ -395,6 +405,17 @@ yoru update --server https://your-host   # or bare --server for your configured 
   auto-generates to `backend/data/.auth_jwt_secret` — fine for a single box,
   but set it yourself when running multiple replicas so tokens stay valid
   across them.
+- **`WEBHOOK_SECRET_ENCRYPTION_KEY`**: webhook signing secrets are encrypted at
+  rest with a key from this variable, or, if unset, from
+  `backend/data/.webhook_secret_key` (generated on first boot). **If you lose
+  that key, the stored webhook secrets are unreadable and every webhook must be
+  regenerated**, so back up `backend/data/` (it holds the database and the key
+  file) together, or pin the variable. If `backend/data` is not persisted
+  across deploys (for example a container path outside your volume), pin the
+  variable, otherwise every deploy generates a new key. The key sits next to
+  the database by default, so a copy of the data directory contains both; pin
+  the variable from your secret store if you need the encryption to survive a
+  stolen volume snapshot.
 - **Abuse guards** (pre-viral; on by default in prod): with `ENV=production`
   the public read route (`/api/v1/public/sessions/{id}`) is rate-limited
   (60/min/IP) automatically — set `RATELIMIT_ENABLED=0` to opt out, or `=1` to

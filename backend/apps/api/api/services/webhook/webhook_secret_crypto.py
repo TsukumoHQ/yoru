@@ -62,3 +62,22 @@ def decrypt_secret(ciphertext: str) -> str:
         return Fernet(_fernet_key()).decrypt(ciphertext.encode("ascii")).decode("utf-8")
     except InvalidToken as exc:
         raise ValueError("webhook secret ciphertext is invalid or tampered") from exc
+
+
+# Every Fernet token starts with the version byte 0x80, which base64-encodes to
+# "gAAAA". Legacy plaintext secrets (hex from generate_webhook_secret, or
+# "whsec_..." from the per-user router) can never start with it.
+_FERNET_PREFIX = "gAAAA"
+
+
+def is_encrypted(stored: str) -> bool:
+    return stored.startswith(_FERNET_PREFIX)
+
+
+def read_secret(stored: str) -> tuple[str, bool]:
+    """Raw signing secret plus whether the row still held it in plaintext
+    (created before vuln-0010). A Fernet-shaped value that fails to decrypt
+    (wrong or lost key) raises ValueError, it is never mistaken for plaintext."""
+    if is_encrypted(stored):
+        return decrypt_secret(stored), False
+    return stored, True

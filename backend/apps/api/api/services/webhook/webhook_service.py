@@ -27,8 +27,8 @@ from apps.api.api.models.webhook.webhook_models import (
     WebhookListResponse,
 )
 from apps.api.api.services.webhook.webhook_secret_crypto import (
-    decrypt_secret,
     encrypt_secret,
+    read_secret,
 )
 from apps.api.api.services.webhook.webhook_signature import generate_webhook_secret
 
@@ -173,7 +173,30 @@ class WebhookService:
         )
         if not webhook or webhook["user_id"] != str(user_id):
             raise NotFoundError("Webhook not found", correlation_id)
-        return decrypt_secret(webhook["secret"])
+        return self._signing_secret(
+            str(webhook_id), webhook["secret"], correlation_id=correlation_id
+        )
+
+    def _signing_secret(
+        self, webhook_id: str, stored: str, correlation_id: str = ""
+    ) -> str:
+        """Raw secret for signing. A row still in plaintext (created before
+        vuln-0010) keeps signing and is encrypted in place on this first read."""
+        raw, legacy = read_secret(stored)
+        if legacy:
+            try:
+                self.supabase.update_record(
+                    "webhooks",
+                    webhook_id,
+                    {"secret": encrypt_secret(raw)},
+                    correlation_id=correlation_id,
+                )
+            except Exception as e:
+                self.logger.log_error(
+                    "Failed to re-encrypt legacy webhook secret",
+                    {"webhook_id": webhook_id, "error": str(e)},
+                )
+        return raw
 
     async def list_webhooks(
         self,
@@ -502,7 +525,11 @@ class WebhookService:
                     "url": webhook["url"],
                     # vuln-0010: the row stores the secret encrypted; decrypt
                     # only here, on the outbound-signing path.
-                    "secret": decrypt_secret(webhook["secret"]),
+                    "secret": self._signing_secret(
+                        str(webhook["id"]),
+                        webhook["secret"],
+                        correlation_id=correlation_id,
+                    ),
                     "event": event_name,
                     "payload": payload,
                     "correlation_id": correlation_id,

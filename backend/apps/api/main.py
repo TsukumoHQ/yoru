@@ -131,6 +131,22 @@ async def lifespan(app: FastAPI):
             },
         )
         raise
+    # Encrypt webhook secrets stored in plaintext before vuln-0010. Idempotent;
+    # non-fatal so a bad row never blocks boot.
+    try:
+        from sqlmodel import Session as _Session
+
+        from apps.api.api.routers.receipt import db as _receipt_db
+        from apps.api.api.services.webhook.legacy_secret_migration import (
+            migrate_subscription_secrets,
+        )
+
+        with _Session(_receipt_db.engine) as _s:
+            _n = migrate_subscription_secrets(_s)
+        if _n:
+            _logger.info("webhook_secrets_encrypted", extra={"rows": _n})
+    except Exception as exc:
+        _logger.warning("webhook_secret_migration_failed", extra={"error": str(exc)})
     # Warm the pricing table (disk cache if fresh, else LiteLLM fetch). Failing
     # is non-fatal — lookup_rates() will use the static fallback.
     try:
