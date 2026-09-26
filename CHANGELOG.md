@@ -5,6 +5,43 @@ The CLI (`yoru-cli`, MIT) is versioned and released separately.
 
 This project follows semantic versioning.
 
+## [0.4.1] - 2026-09-26
+
+Security patch for 0.4.0, from a pre-GA penetration-test pass. No API shape
+changes and no CLI change; yoru-cli stays at 0.3.0.
+
+### Security
+
+- Outbound webhook signing secrets are now encrypted at rest (Fernet), for both
+  the per-user and the org/admin webhook surfaces. The key comes from
+  `WEBHOOK_SECRET_ENCRYPTION_KEY`, or is generated once and persisted at
+  `backend/data/.webhook_secret_key`; back that file up, a lost key makes stored
+  secrets unreadable. The org/admin webhook API no longer returns the secret on
+  every read, only on create and regenerate. (23b1a3b, task:bb1f35fc)
+- The session and refresh cookies now carry `Secure` when
+  `ENVIRONMENT=production`. The refresh cookie was hardcoded to `Secure=false`.
+  (23b1a3b, task:bb1f35fc)
+- Deleting a red-flag rule (`DELETE /orgs/{org_id}/red-flag-rules/{rule_id}`)
+  now requires an org owner or admin; a plain member could delete an owner's
+  rule. (23b1a3b, task:bb1f35fc)
+- Updating a red-flag rule (`PATCH`) now requires an org owner or admin, or the
+  rule's creator; a plain member could disable someone else's rule. Creating a
+  rule stays open to members. (877d7fd, task:4e5a32c4)
+- `GET /auth/org/identities`: the pentest's cross-tenant finding did not
+  reproduce (the endpoint already required an org admin); the existing denial
+  tests were re-run and no code changed. (23b1a3b, task:bb1f35fc)
+- `POST /sessions/events` now refuses events for a session owned by another
+  identity; any org's hook token could previously append to and hijack another
+  identity's audit trail. (96c75fd, task:dc033681)
+
+### Changed
+
+- `LICENSING.md` and `LICENSE` scope no longer name the retired Receipt product,
+  `receipt.dev`, or `opentruth.ch`. (e37f737, task:98ec4d50)
+- Dashboard tests: `OrgIdentitiesPage` and `TokensPage` vitest cases no longer
+  depend on the wall clock. Test-only, no runtime change. (2f72612,
+  task:dccf35db)
+
 ## [0.4.0] - 2026-09-03
 
 Org-scoped identity and a CTO console. Every paired CLI is now a first-class
