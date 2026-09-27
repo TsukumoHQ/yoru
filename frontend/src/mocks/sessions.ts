@@ -14,6 +14,7 @@ const FIXTURES: Session[] = [
   {
     id: "s_01",
     user_email: "alice@acme.dev",
+    agent: "claude-code",
     started_at: iso(12 * 60_000),
     ended_at: iso(3 * 60_000),
     duration_ms: 9 * 60_000 + 14_000,
@@ -27,6 +28,7 @@ const FIXTURES: Session[] = [
   {
     id: "s_02",
     user_email: "bob@acme.dev",
+    agent: "codex",
     started_at: iso(38 * 60_000),
     ended_at: iso(6 * 60_000),
     duration_ms: 32 * 60_000,
@@ -40,6 +42,7 @@ const FIXTURES: Session[] = [
   {
     id: "s_03",
     user_email: "carol@acme.dev",
+    agent: "opencode",
     started_at: iso(2 * 3600_000),
     ended_at: iso(2 * 3600_000 - 22 * 60_000),
     duration_ms: 22 * 60_000,
@@ -53,6 +56,7 @@ const FIXTURES: Session[] = [
   {
     id: "s_04",
     user_email: "alice@acme.dev",
+    agent: "cursor",
     started_at: iso(5 * 60_000),
     ended_at: null,
     duration_ms: 5 * 60_000,
@@ -66,6 +70,7 @@ const FIXTURES: Session[] = [
   {
     id: "s_05",
     user_email: "dan@acme.dev",
+    agent: "codex",
     started_at: iso(26 * 3600_000),
     ended_at: iso(26 * 3600_000 - 44 * 60_000),
     duration_ms: 44 * 60_000,
@@ -79,6 +84,7 @@ const FIXTURES: Session[] = [
   {
     id: "s_06",
     user_email: "bob@acme.dev",
+    agent: "claude-code",
     started_at: iso(3 * 86400_000),
     ended_at: iso(3 * 86400_000 - 7 * 60_000),
     duration_ms: 7 * 60_000,
@@ -92,6 +98,7 @@ const FIXTURES: Session[] = [
   {
     id: "s_07",
     user_email: "alice@acme.dev",
+    agent: "opencode",
     started_at: iso(4 * 86400_000),
     ended_at: iso(4 * 86400_000 - 18 * 60_000),
     duration_ms: 18 * 60_000,
@@ -105,6 +112,7 @@ const FIXTURES: Session[] = [
   {
     id: "s_08",
     user_email: "eve@acme.dev",
+    agent: "cursor",
     started_at: iso(6 * 86400_000),
     ended_at: iso(6 * 86400_000 - 11 * 60_000),
     duration_ms: 11 * 60_000,
