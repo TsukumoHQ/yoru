@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -25,6 +25,7 @@ from apps.api.api.middlewares.metrics import (
     CONTENT_TYPE_LATEST,
     RequestMetricsMiddleware,
     render_prometheus,
+    require_metrics_access,
 )
 from apps.api.api.middlewares.rate_limit import RateLimitMiddleware
 from apps.api.api.routers.admin.groups.router import AdminGroupsRouter
@@ -380,7 +381,7 @@ async def root():
     }
 
 
-@app.get("/metrics", tags=["ops"])
+@app.get("/metrics", tags=["ops"], dependencies=[Depends(require_metrics_access)])
 async def metrics() -> Response:
     return Response(
         content=render_prometheus(),

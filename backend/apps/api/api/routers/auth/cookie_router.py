@@ -116,6 +116,7 @@ class SignupForm(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     invitation_token: str | None = None
+    setup_token: str | None = None
 
 
 class SessionUserResponse(BaseModel):
@@ -210,6 +211,7 @@ class CookieAuthRouter:
             first_name=data.first_name,
             last_name=data.last_name,
             invitation_token=data.invitation_token,
+            setup_token=data.setup_token,
         )
         try:
             auth_response = await self._service.sign_up(signup_request, correlation_id)

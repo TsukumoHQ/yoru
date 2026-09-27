@@ -22,9 +22,12 @@ is excluded (scrape traffic is noise, not signal).
 """
 from __future__ import annotations
 
+import os
+import secrets
 import time
 from typing import Iterable
 
+from fastapi import HTTPException, Request
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     Counter,
@@ -40,6 +43,7 @@ __all__ = [
     "http_requests_total",
     "receipt_events_ingested_total",
     "render_prometheus",
+    "require_metrics_access",
 ]
 
 receipt_events_ingested_total = Counter(
@@ -67,6 +71,26 @@ _EXCLUDE_PATHS: frozenset[str] = frozenset({"/metrics"})
 def render_prometheus() -> bytes:
     """Return the Prometheus exposition snapshot as bytes (wire-ready)."""
     return generate_latest()
+
+
+def require_metrics_access(request: Request) -> None:
+    """Gate GET /metrics: internal request-rate/latency data, not for public
+    exposure. With `METRICS_TOKEN` set, a matching bearer token is required
+    (401 otherwise). Without it, production (`ENVIRONMENT=production`) 404s
+    the route entirely — indistinguishable from a route that doesn't exist —
+    unless the operator opts in with `METRICS_PUBLIC=1`. Dev/local (no
+    ENVIRONMENT=production) stays open by default for local scraping."""
+    token = os.getenv("METRICS_TOKEN", "").strip()
+    if token:
+        auth = request.headers.get("authorization", "")
+        provided = auth[7:] if auth.lower().startswith("bearer ") else ""
+        if not secrets.compare_digest(token, provided):
+            raise HTTPException(status_code=401, detail="Invalid or missing metrics token")
+        return
+    is_production = os.getenv("ENVIRONMENT", "").strip().lower() in ("prod", "production")
+    metrics_public = os.getenv("METRICS_PUBLIC", "").strip() == "1"
+    if is_production and not metrics_public:
+        raise HTTPException(status_code=404, detail="Not Found")
 
 
 class RequestMetricsMiddleware:

@@ -21,6 +21,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from apps.api.api.routers.receipt.db import _DB_URL as CURRENT_DB_URL
@@ -83,9 +84,16 @@ class SetupService:
                     select(AuthUser).where(AuthUser.role == "admin")
                 ).first()
                 return admin is not None
-        except Exception:
-            # Table not created yet → definitely not installed.
-            return False
+        except (OperationalError, ProgrammingError) as e:
+            # A genuinely fresh install has no auth_user table yet — that,
+            # and only that, means "not installed". Any other DB error
+            # (timeout, connection drop, disk full) must NOT fail open to
+            # False, or a transient blip on an already-installed instance
+            # would reopen /setup/init; let it propagate instead.
+            msg = str(e).lower()
+            if "no such table" in msg or "does not exist" in msg or "undefinedtable" in msg:
+                return False
+            raise
 
     def _db_reachable(self) -> bool:
         try:

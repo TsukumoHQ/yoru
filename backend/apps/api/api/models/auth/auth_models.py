@@ -31,6 +31,13 @@ class SignUpRequest(BaseModel):
     invitation_token: str | None = Field(
         None, description="Optional invitation token for invited users"
     )
+    setup_token: str | None = Field(
+        None,
+        description=(
+            "Required to become the first (admin) account when SETUP_TOKEN "
+            "is configured for this instance"
+        ),
+    )
 
 
 class SignInRequest(BaseModel):

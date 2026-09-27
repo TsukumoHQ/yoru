@@ -232,8 +232,22 @@ class LocalAuthProvider(AuthProvider):
                     "An account with this email already exists", correlation_id
                 )
 
-            # First registered user is the instance admin.
+            # First registered user is the instance admin. When SETUP_TOKEN is
+            # configured (recommended for any internet-exposed deployment),
+            # that grant is gated the same way /setup/init is — otherwise the
+            # token only protects the wizard, and plain signup is a wide-open
+            # side door to becoming admin.
             is_first = session.exec(select(AuthUser)).first() is None
+            if is_first:
+                required_token = os.getenv("SETUP_TOKEN", "").strip()
+                if required_token and not secrets.compare_digest(
+                    required_token, (data.setup_token or "").strip()
+                ):
+                    raise ValidationError(
+                        "This instance requires a valid setup token to create "
+                        "the first admin account",
+                        correlation_id,
+                    )
             now = _utcnow()
             user = AuthUser(
                 id=uuid4().hex,

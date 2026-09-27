@@ -82,6 +82,18 @@ class InstanceAdminRouter:
         self.router.post("/retention/prune", summary="Delete data older than the policy now")(self.prune_now)
 
     # ── users ────────────────────────────────────────────────────────────
+    def _count_admins(self, session: Session) -> int:
+        return len(session.exec(select(AuthUser).where(AuthUser.role == "admin")).all())
+
+    def _refuse_if_last_admin(self, session: Session, user: AuthUser) -> None:
+        """An instance can never end up with zero admins — that's a
+        permanent lockout with no recovery path (self-hosted, no support
+        console). Refuse the demote/delete instead."""
+        if user.role == "admin" and self._count_admins(session) <= 1:
+            raise HTTPException(
+                status_code=409, detail="Cannot remove the last remaining admin"
+            )
+
     def _require_local(self) -> None:
         if os.getenv("AUTH_PROVIDER", "local").strip().lower() != "local":
             raise HTTPException(
@@ -137,6 +149,8 @@ class InstanceAdminRouter:
             user = s.exec(select(AuthUser).where(AuthUser.id == UUID(user_id).hex)).first()
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
+            if body.role != "admin":
+                self._refuse_if_last_admin(s, user)
             user.role = body.role
             user.updated_at = datetime.now(timezone.utc)
             s.add(user)
@@ -160,6 +174,7 @@ class InstanceAdminRouter:
             user = s.exec(select(AuthUser).where(AuthUser.id == hexid)).first()
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
+            self._refuse_if_last_admin(s, user)
             s.delete(user)
             s.commit()
         return {"ok": True}
